@@ -1,0 +1,160 @@
+<div id="task-box" class="box b1 container max-height-400 scroll-y h-center" style="display: none;"></div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    await updateTaskBox();
+  });
+
+  updateTaskBox = async () => {
+    let task_box = document.getElementById("task-box");
+    task_box.innerHTML = "";
+
+    let tasks = await taskFilter({ status: 'Pendente' });
+
+    if (!tasks.length) {
+      task_box.append(lib.element.create("div", {
+        class: "box b1 lucida-grande bold padding-20 center"
+      }, "Nenhuma tarefa"));
+      return;
+    }
+
+    let milestones = await API.response(Milestone.filter, {});
+
+    tasks.forEach(task => {
+      let task_div = taskDiv(task, milestones);
+      task_box.append(task_div);
+    });
+  };
+
+  function taskDiv(task, milestones) {
+    let task_div = lib.element.create("div", {
+      class: "box b2-3 container ground border shadow-st margin-top-10 padding-3",
+    });
+
+    let option_div = lib.element.create("div", {
+      class: "container b1 right padding-3"
+    });
+    task_div.append(option_div);
+
+    let milestone_select = lib.element.create("select", {
+      class: "milestone-select mobile-box b7-10 lucida-grande rem08 border padding-3 v-center"
+    });
+    option_div.append(milestone_select);
+
+    let default_option = lib.element.create("option", {
+      value: "",
+    }, "Selecione uma meta");
+    milestone_select.append(default_option);
+
+    milestones.forEach(milestone => {
+      let option = lib.element.create("option", {
+        value: milestone.id
+      }, milestone.description);
+      milestone_select.append(option);
+    });
+
+    milestone_select.value = task.milestone_id || "";
+
+    let task_text = lib.element.create("textarea", {
+      class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",
+      'data-initial_value': task.description
+    }, task.description);
+    task_div.append(task_text);
+
+    let update_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/increase.png");
+    option_div.append(update_icon);
+
+    let delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/trash.png");
+    option_div.append(delete_icon);
+
+    let done_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/done.png");
+    option_div.append(done_icon);
+
+    // events
+    task_text.addEventListener("blur", async () => {
+      if (task_text.value === task_text.dataset.initial_value) {
+        return;
+      }
+
+      if (!task_text.value) {
+        task_text.value = task_text.dataset.initial_value;
+        return lib.message("O objetivo não pode ser vazio.");
+      }
+
+      lib.confirm("Deseja atualizar o objetivo?", async r => {
+        if (!r) { return; }
+
+        let updated_task = {
+          id: task.id,
+          description: task_text.value
+        };
+
+        let response = await API.response(Task.update, updated_task);
+
+        lib.message(response, () => {
+          task_text.dataset.initial_value = task_text.value;
+        });
+      });
+    });
+
+    update_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja atualizar o objetivo?", async r => {
+        if (!r) { return; }
+
+        let updated_task = {
+          id: task.id,
+          status: "Em execução"
+        };
+
+        let response = await API.response(Task.update, updated_task);
+        if (!response.done) { return; }
+
+        let active_task_box = document.getElementById("active-task-box");
+
+        task.status = "Em execução";
+
+        let active_task_div = activeTaskDiv({
+          ...task,
+        }, milestones);
+
+        active_task_box.append(active_task_div);
+        task_div.remove();
+      });
+    });
+
+    milestone_select.addEventListener("change", async () => {
+      let task_updated = {
+        id: task.id,
+        milestone_id: milestone_select.value
+      };
+
+      let response = await API.response(Task.update, task_updated, milestone_select);
+      if (!response.done) { return; }
+
+      task.milestone_id = milestone_select.value;
+    });
+
+    delete_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja excluir a tarefa?", async r => {
+        if (r) { return; }
+
+        let response = await API.response(Task.delete, task.id);
+        lib.message(response, () => {
+          task_div.remove();
+        });
+      }, "Não excluir", "Excluir tarefa");
+    });
+
+    return task_div;
+  }
+
+  async function taskFilter(task) {
+    let tasks = await API.response(Task.filter, task);
+    if (!tasks) { return false; }
+
+    return tasks;
+  };
+</script>

@@ -1,0 +1,79 @@
+<script>
+  async function milestoneCreateForm() {
+    let milestone_create_form = lib.element.create("form", {
+      class: "box b1 container padding-10"
+    });
+
+    let title_box = lib.element.create("div", {
+      class: "mobile-box container center"
+    });
+    milestone_create_form.append(title_box);
+
+    let title_text = lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Nova meta");
+    title_box.append(title_text);
+
+    let title_icon = lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/milestone.png"
+    });
+    title_box.append(title_icon);
+
+    let goals = await API.response(Goal.filter, {});
+
+    let goal_select = lib.element.create("select", {
+      class: "box b1 hide-disabled radius-1 padding-10 margin-top-5"
+    });
+    milestone_create_form.append(goal_select);
+
+    goal_select.append(lib.element.create("option", {
+      value: "",
+      selected: true,
+      disabled: true
+    }, "Selecione um objetivo"));
+
+    goals.forEach(goal => {
+      goal_select.append(lib.element.create("option", {
+        value: goal.id
+      }, goal.description));
+    });
+
+    let description = lib.element.create("textarea", {
+      class: "box b1 height-50 padding-5 radius-1 margin-top-5"
+    });
+    milestone_create_form.append(description);
+
+    let submit = lib.element.create("button", {
+      class: "box b4 btn-act lucida-grande bold noborder padding-10 margin-top-5 pointer noselect"
+    }, "Criar meta");
+    milestone_create_form.append(submit);
+
+    milestone_create_form.addEventListener("submit", async e => {
+      e.preventDefault();
+
+      let milestone = {
+        goal_id: goal_select.value || null,
+        description: description.value
+      };
+
+      let response = await API.response(Milestone.create, milestone);
+      milestone.id = response.milestone.id;
+
+      lib.message(response.done, () => {
+        let milestone_box = document.getElementById("milestone-box");
+        milestone_box.append(milestoneDiv(milestone, goals));
+
+        document.querySelectorAll('.milestone-select').forEach(select => {
+          select.append(lib.element.create("option", {
+            value: milestone.id
+          }, milestone.description));
+        });
+
+        lib.popout(milestone_create_form);
+      });
+    });
+
+    return milestone_create_form;
+  };
+</script>

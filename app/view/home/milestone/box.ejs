@@ -1,0 +1,154 @@
+<div id="milestone-box" class="box b1 container max-height-400 scroll-y h-center" style="display: none;"></div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    await updateMilestoneBox();
+  });
+
+  async function updateMilestoneBox() {
+    let milestone_box = document.getElementById("milestone-box");
+    milestone_box.innerHTML = "";
+
+    let milestones = await milestoneFilter({});
+
+    if (!milestones.length) {
+      milestone_box.append(lib.element.create("div", {
+        class: "box b1 lucida-grande bold padding-20 center"
+      }, "Nenhuma meta"));
+      return;
+    }
+
+    let goals = await API.response(Goal.filter, {});
+
+    milestones.forEach(milestone => {
+      let milestone_div = milestoneDiv(milestone, goals);
+      milestone_box.append(milestone_div);
+    });
+  };
+
+  async function milestoneFilter(milestone) {
+    let milestones = await API.response(Milestone.filter, milestone);
+    if (!milestones) { return false; }
+
+    return milestones;
+  };
+
+  function milestoneDiv(milestone, goals) {
+    let milestone_div = lib.element.create("div", {
+      class: "box b2-3 container ground border shadow-st margin-top-10 padding-3",
+    });
+
+    let option_div = lib.element.create("div", {
+      class: "container b1 right padding-3"
+    });
+    milestone_div.append(option_div);
+
+    let goal_select = lib.element.create("select", {
+      class: "goal-select mobile-box b7-10 lucida-grande rem08 border padding-3 v-center"
+    });
+    option_div.append(goal_select);
+
+    let default_option = lib.element.create("option", {
+      value: "",
+    }, "Selecione um objetivo");
+    goal_select.append(default_option);
+
+    goals.forEach(goal => {
+      let option = lib.element.create("option", {
+        value: goal.id
+      }, goal.description);
+      goal_select.append(option);
+    });
+
+    goal_select.value = milestone.goal_id || "";
+
+    let update_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/return.png");
+    option_div.append(update_icon);
+
+    let delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/trash.png");
+    option_div.append(delete_icon);
+
+    let done_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/done.png");
+    option_div.append(done_icon);
+
+    let milestone_text = lib.element.create("textarea", {
+      class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",
+      'data-initial_value': milestone.description
+    }, milestone.description);
+    milestone_div.append(milestone_text);
+
+    // events
+    milestone_text.addEventListener("blur", async () => {
+      if (milestone_text.value === milestone_text.dataset.initial_value) {
+        return;
+      }
+
+      if (!milestone_text.value) {
+        milestone_text.value = milestone_text.dataset.initial_value;
+        return lib.message("O objetivo não pode ser vazio.");
+      }
+
+      lib.confirm("Deseja atualizar a meta?", async r => {
+        if (!r) { return; }
+
+        let updated_milestone = {
+          id: milestone.id,
+          description: milestone_text.value
+        };
+
+        let response = await API.response(Milestone.update, updated_milestone);
+
+        lib.message(response);
+
+        milestone_text.dataset.initial_value = milestone_text.value;
+      });
+    });
+
+    done_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja concluir a meta?", async r => {
+        if (!r) { return; }
+
+        let updated_milestone = {
+          id: milestone.id,
+          status: "Concluído"
+        };
+
+        let response = await API.response(Milestone.update, updated_milestone);
+        if (!response.done) { return; }
+
+        lib.message(response.done, () => {
+          milestone_div.remove();
+        });
+      });
+    });
+
+    goal_select.addEventListener("change", async () => {
+      if (goal_select.value === milestone.goal_id) {
+        return;
+      }
+
+      let updated_milestone = {
+        id: milestone.id,
+        goal_id: goal_select.value
+      };
+
+      let response = await API.response(Milestone.update, updated_milestone, goal_select);
+    });
+
+    delete_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja excluir a meta?", async r => {
+        if (r) { return; }
+
+        let response = await API.response(Milestone.delete, milestone.id);
+        lib.message(response, () => {
+          milestone_div.remove();
+        });
+      }, "Não excluir", "Excluir meta");
+    });
+
+    return milestone_div;
+  };
+</script>

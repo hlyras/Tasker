@@ -1,0 +1,83 @@
+<html lang="pt-BR">
+
+<head>
+  <%- include('./../partials/head.ejs') %>
+</head>
+
+<body>
+  <%- include('./../partials/header.ejs') %>
+  <section class="container h-center">
+    <div id="alert-messages" class="box b1 container margin-bottom-10 h-center"></div>
+
+    <div class="box b1 container">
+      <div class="mobile-box container right margin-right-10">
+        <img id="calendar-icon"
+          class='image-prop size-25 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
+          src='/images/icon/calendar.png'>
+        <img id="goal-icon"
+          class='image-prop size-25 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
+          src='/images/icon/goal.webp'>
+        <img id="milestone-icon"
+          class='image-prop size-25 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
+          src='/images/icon/milestone.png'>
+        <img id="task-icon"
+          class='image-prop size-25 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
+          src='/images/icon/task.png'>
+      </div>
+    </div>
+  </section>
+
+  <section class="container margin-top-20 margin-bottom-20 h-center">
+    <div class="box b2-3 container ground padding-15 border">
+      <div class="box b1 container">
+        <%- include('./goal/main.ejs') %>
+        <%- include('./milestone/main.ejs') %>
+        <%- include('./task/main.ejs') %>
+
+        <div class="box b1 container margin-top-5">
+          <%- include('./goal/box.ejs') %>
+          <%- include('./milestone/box.ejs') %>
+          <%- include('./task/box.ejs') %>
+        </div>
+      </div>
+
+      <%- include('./active-task/main.ejs') %>
+    </div>
+  </section>
+</body>
+<footer>
+  <%- include('./../partials/footer.ejs') %>
+  <script src="/js/goal/main.js"></script>
+  <script src="/js/milestone/main.js"></script>
+  <script src="/js/task/main.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async function () {
+      let goal_icon = document.getElementById("goal-icon");
+      let milestone_icon = document.getElementById("milestone-icon");
+      let task_icon = document.getElementById("task-icon");
+
+      goal_icon.addEventListener("click", async () => {
+        lib.popup(await goalCreateForm());
+      });
+
+      milestone_icon.addEventListener("click", async () => {
+        lib.popup(await milestoneCreateForm());
+      });
+
+      task_icon.addEventListener("click", async () => {
+        lib.popup(await taskCreateForm());
+      });
+    });
+
+    // document.addEventListener("DOMContentLoaded", async () => {
+    //   let calendar_icon = document.getElementById("calendar-icon");
+
+    //   calendar_icon.addEventListener("click", async () => {
+    //     lib.popup(await calendarCreateForm());
+    //   });
+    // });
+  </script>
+</footer>
+
+</html>

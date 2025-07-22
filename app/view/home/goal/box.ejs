@@ -1,0 +1,123 @@
+<div id="goal-box" class="box b1 container max-height-400 scroll-y h-center" style="display: none;"></div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    await updateGoalBox();
+  });
+
+  async function updateGoalBox() {
+    let goal_box = document.getElementById("goal-box");
+    goal_box.innerHTML = "";
+
+    let goals = await goalFilter({});
+
+    if (!goals.length) {
+      goal_box.append(lib.element.create("div", {
+        class: "box b1 lucida-grande bold padding-20 center"
+      }, "Nenhum objetivo"));
+      return;
+    }
+
+    goals.forEach(goal => {
+      let goal_div = goalDiv(goal);
+      goal_box.append(goal_div);
+    });
+  };
+
+  function goalDiv(goal) {
+    let goal_div = lib.element.create("div", {
+      class: "box b2-3 container ground border shadow-st padding-3 margin-top-10"
+    });
+
+    let option_div = lib.element.create("div", {
+      class: "container b1 right padding-5"
+    });
+    goal_div.append(option_div);
+
+    option_div.append(lib.element.create("div", {
+      class: "mobile-box b7-10",
+    }));
+
+    option_div.append(lib.element.create("div", {
+      class: "mobile-box b10",
+    }));
+
+    let delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/trash.png");
+    option_div.append(delete_icon);
+
+    let done_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/done.png");
+    option_div.append(done_icon);
+
+    let goal_text = lib.element.create("textarea", {
+      class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",
+      'data-initial_value': goal.description
+    }, goal.description);
+    goal_div.append(goal_text);
+
+    // events
+    goal_text.addEventListener("blur", async () => {
+      if (goal_text.value === goal_text.dataset.initial_value) {
+        return;
+      }
+
+      if (!goal_text.value) {
+        goal_text.value = goal_text.dataset.initial_value;
+        return lib.message("O objetivo não pode ser vazio.");
+      }
+
+      lib.confirm("Deseja atualizar o objetivo?", async r => {
+        if (!r) { return; }
+
+        let goal_updated = {
+          id: goal.id,
+          description: goal_text.value
+        };
+
+        let response = await API.response(Goal.update, goal_updated);
+
+        lib.message(response.done, () => {
+          goal_text.dataset.initial_value = goal_text.value;
+        });
+      });
+    });
+
+    done_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja concluir o objetivo?", async r => {
+        if (!r) { return; }
+
+        let response = await API.response(Goal.update, {
+          id: goal.id,
+          status: "Concluído"
+        });
+
+        if (!response.done) { return; }
+
+        lib.message(response.done, () => {
+          goal_div.remove();
+        });
+      });
+    });
+
+    delete_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja excluir o objetivo?", async r => {
+        if (r) { return; }
+
+        let response = await API.response(Goal.delete, goal.id);
+        lib.message(response, () => {
+          goal_div.remove();
+        });
+      }, "Não excluir", "Excluir objetivo");
+    });
+
+    return goal_div;
+  };
+
+  async function goalFilter(goal) {
+    let goals = await API.response(Goal.filter, goal);
+    if (!goals) { return false; }
+
+    return goals;
+  };
+</script>

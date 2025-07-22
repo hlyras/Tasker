@@ -1,0 +1,24 @@
+<%- include('./create.ejs') %>
+
+<div id="goal-header"
+  class="container mobile-box b3 h-center noselect padding-5 pointer border shadow-lg-st radius-5 lucida-grande">
+  <div class="mobile-box container">
+    <div class="mobile-box lucida-grande bold text-shadow margin-right-5 v-center">Objetivos</div>
+    <img class="image-prop size-20 v-center" src="/images/icon/goal.webp">
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    let goal_header = document.getElementById("goal-header");
+
+    goal_header.addEventListener("click", async () => {
+      let goal_box = document.getElementById("goal-box");
+      let milestone_box = document.getElementById("milestone-box");
+      let task_box = document.getElementById("task-box");
+      lib.displayDiv(goal_box, document.getElementById("goal-header"));
+      lib.display(milestone_box, "none");
+      lib.display(task_box, "none");
+    });
+  });
+</script>

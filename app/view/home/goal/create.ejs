@@ -1,0 +1,59 @@
+<script>
+  async function goalCreateForm() {
+    let goal_create_form = lib.element.create("form", {
+      class: "box b1 container padding-10"
+    });
+
+    let title_box = lib.element.create("div", {
+      class: "mobile-box container center"
+    });
+    goal_create_form.append(title_box);
+
+    let title_text = lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Novo objetivo");
+    title_box.append(title_text);
+
+    let title_icon = lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/goal.png"
+    });
+    title_box.append(title_icon);
+
+    let description = lib.element.create("textarea", {
+      class: "box b1 height-50 padding-5 radius-1 margin-top-5"
+    });
+    goal_create_form.append(description);
+
+    let submit = lib.element.create("button", {
+      class: "box b4 btn-act lucida-grande bold noborder padding-10 margin-top-5 pointer noselect"
+    }, "Criar objetivo");
+    goal_create_form.append(submit);
+
+    goal_create_form.addEventListener("submit", async e => {
+      e.preventDefault();
+
+      let goal = {
+        description: description.value
+      };
+
+      let response = await API.response(Goal.create, goal);
+      goal.id = response.goal.id;
+
+      lib.message(response.done, () => {
+        let goal_box = document.getElementById("goal-box");
+        goal_box.append(goalDiv(goal));
+
+        document.querySelectorAll('.goal-select').forEach(select => {
+          select.append(lib.element.create("option", {
+            value: goal.id
+          }, goal.description));
+        });
+
+        lib.popout(goal_create_form);
+      });
+    });
+
+    return goal_create_form;
+  };
+</script>

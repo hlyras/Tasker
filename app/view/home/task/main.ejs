@@ -1,0 +1,24 @@
+<%- include('./create.ejs') %>
+
+<div id="task-header"
+  class="container mobile-box b3 h-center noselect padding-5 pointer border shadow-lg-st radius-5 lucida-grande">
+  <div class="mobile-box container">
+    <div class="mobile-box v-center margin-right-5 lucida-grande bold text-shadow">Tarefas</div>
+    <img class="image-prop size-20 v-center" src="/images/icon/task.png">
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    let task_header = document.getElementById("task-header");
+
+    task_header.addEventListener("click", async () => {
+      let goal_box = document.getElementById("goal-box");
+      let milestone_box = document.getElementById("milestone-box");
+      let task_box = document.getElementById("task-box");
+      lib.display(goal_box, "none");
+      lib.display(milestone_box, "none");
+      lib.displayDiv("task-box", document.getElementById("task-header"));
+    });
+  });
+</script>
