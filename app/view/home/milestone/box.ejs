@@ -44,7 +44,7 @@
     milestone_div.append(option_div);
 
     let goal_select = lib.element.create("select", {
-      class: "goal-select mobile-box b7-10 lucida-grande rem08 border padding-3 v-center"
+      class: "goal-select mobile-box b8-10 lucida-grande rem08 border padding-3 v-center"
     });
     option_div.append(goal_select);
 
@@ -61,10 +61,6 @@
     });
 
     goal_select.value = milestone.goal_id || "";
-
-    let update_icon = lib.element.icon("b10 opacity-out-08 pointer",
-      "20", "/images/icon/return.png");
-    option_div.append(update_icon);
 
     let delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
       "20", "/images/icon/trash.png");

@@ -110,7 +110,7 @@
         return lib.message("A tarefa não pode ser vazia.");
       }
 
-      lib.confirm("Deseja atualizar o objetivo?", async r => {
+      lib.confirm("Deseja atualizar a tarefa?", async r => {
         if (!r) { return; }
 
         let updated_task = {
@@ -168,7 +168,7 @@
       lib.confirm("Deseja excluir a tarefa?", async r => {
         if (r) { return; }
 
-        let response = await API.response(Task.delete, task.id);
+        let response = await API.response(Task.delete, active_task.id);
         lib.message(response, () => {
           active_task_div.remove();
         });
