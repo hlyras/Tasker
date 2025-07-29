@@ -3,33 +3,33 @@ const dbconfig = require('./database');
 
 // environments: development | production
 const pool = mysql.createPool({
-	connectionLimit: 75,
-	host: dbconfig.production.database.host,
-	port: dbconfig.production.database.port,
-	user: dbconfig.production.database.user,
-	password: dbconfig.production.database.password,
-	charset: 'utf8mb4'
+  connectionLimit: 75,
+  host: dbconfig.development.database.host,
+  port: dbconfig.development.database.port,
+  user: dbconfig.development.database.user,
+  password: dbconfig.development.database.password,
+  charset: 'utf8mb4'
 });
 
 const db = async (query, values) => {
-	return new Promise((resolve, reject) => {
-		pool.getConnection((err, connection) => {
-			if (err) {
-				reject(err);
-				return;
-			}
+  return new Promise((resolve, reject) => {
+    pool.getConnection((err, connection) => {
+      if (err) {
+        reject(err);
+        return;
+      }
 
-			connection.query(query, values, (err, rows) => {
-				connection.release();
-				if (err) {
-					console.log(err);
-					reject(err);
-					return;
-				}
-				resolve(rows);
-			});
-		});
-	});
+      connection.query(query, values, (err, rows) => {
+        connection.release();
+        if (err) {
+          console.log(err);
+          reject(err);
+          return;
+        }
+        resolve(rows);
+      });
+    });
+  });
 };
 
 // async function seeAndCloseConnections() {
