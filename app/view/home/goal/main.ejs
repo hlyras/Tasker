@@ -11,6 +11,8 @@
 <script>
   document.addEventListener("DOMContentLoaded", async () => {
     let goal_header = document.getElementById("goal-header");
+    let milestone_header = document.getElementById("milestone-header");
+    let task_header = document.getElementById("task-header");
 
     goal_header.addEventListener("click", async () => {
       let goal_box = document.getElementById("goal-box");
@@ -19,6 +21,14 @@
       lib.displayDiv(goal_box, document.getElementById("goal-header"));
       lib.display(milestone_box, "none");
       lib.display(task_box, "none");
+      
+      if(goal_box.style.display != "none") {
+        lib.addCss(goal_header, ["shadow-st"]);
+        lib.removeCss(milestone_header, ["shadow-st"]);
+        lib.removeCss(task_header, ["shadow-st"]);
+      } else {
+        lib.removeCss(goal_header, ["shadow-st"]);
+      }
     });
   });
 </script>
