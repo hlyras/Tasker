@@ -32,6 +32,7 @@ milestoneController.update = async (req, res) => {
   milestone.id = req.body.id;
   milestone.goal_id = req.body.goal_id;
   milestone.description = req.body.description;
+  milestone.status = req.body.status;
 
   try {
     let milestone_response = await milestone.update();
@@ -49,8 +50,15 @@ milestoneController.update = async (req, res) => {
 };
 
 milestoneController.filter = async (req, res) => {
+  let milestone_options = {
+    strict_params: { keys: [], values: [] },
+    order_params: [['id', 'desc']]
+  };
+
+  lib.Query.fillParam("milestone.status", req.body.status, milestone_options.strict_params);
+
   try {
-    let milestones = await Milestone.filter({ order: [['id', 'desc']] });
+    let milestones = await Milestone.filter(milestone_options);
 
     return res.send({ milestones });
   } catch (error) {

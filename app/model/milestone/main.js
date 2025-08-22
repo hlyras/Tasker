@@ -22,6 +22,8 @@ const Milestone = function () {
     let obj = lib.convertTo.object(this);
     let { query, values } = lib.Query.update(obj, 'cms_tasker.milestone', 'id');
 
+    console.log(query, values);
+
     return db(query, values);
   };
 };

@@ -1,4 +1,5 @@
-<div id="milestone-box" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;"></div>
+<div id="milestone-box" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;">
+</div>
 
 <script>
   document.addEventListener("DOMContentLoaded", async () => {
@@ -9,7 +10,9 @@
     let milestone_box = document.getElementById("milestone-box");
     milestone_box.innerHTML = "";
 
-    let milestones = await milestoneFilter({});
+    let milestones = await milestoneFilter({
+      status: "Pendente"
+    });
 
     if (!milestones.length) {
       milestone_box.append(lib.element.create("div", {
