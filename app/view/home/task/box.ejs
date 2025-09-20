@@ -11,6 +11,8 @@
 
     let tasks = await taskFilter({ status: 'Pendente' });
 
+    tasks = lib.sort(tasks, "datetime", "desc");
+
     if (!tasks.length) {
       task_box.append(lib.element.create("div", {
         class: "box b1 lucida-grande bold padding-20 center"
