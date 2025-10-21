@@ -17,12 +17,12 @@
     milestone_header.addEventListener("click", async () => {
       let goal_box = document.getElementById("goal-box");
       let milestone_box = document.getElementById("milestone-box");
-      let task_box = document.getElementById("task-box");
+      let task_container = document.getElementById("task-container");
       lib.display(goal_box, "none");
       lib.displayDiv(milestone_box, document.getElementById("task-header"));
-      lib.display(task_box, "none");
+      lib.display(task_container, "none");
 
-      if(milestone_box.style.display != "none") {
+      if (milestone_box.style.display != "none") {
         lib.removeCss(goal_header, ["shadow-st"]);
         lib.addCss(milestone_header, ["shadow-st"]);
         lib.removeCss(task_header, ["shadow-st"]);

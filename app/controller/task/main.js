@@ -54,6 +54,7 @@ taskController.filter = async (req, res) => {
     order: [['id', 'desc']]
   };
 
+  lib.Query.fillParam("task.milestone_id", req.body.milestone_id, task_options.strict_params);
   lib.Query.fillParam("task.status", req.body.status, task_options.strict_params);
 
   try {
@@ -70,11 +71,13 @@ taskController.filter = async (req, res) => {
 
 taskController.delete = async (req, res) => {
   try {
-    let response = await Task.delete({
-      strict_params: {
-        keys: ['id'], values: [req.params.id]
-      }
-    });
+    // let response = await Task.delete({
+    //   strict_params: {
+    //     keys: ['id'], values: [req.params.id]
+    //   }
+    // });
+
+    await Task.delete(req.params.id);
 
     return res.send({ done: "Tarefa excluída." });
   } catch (error) {

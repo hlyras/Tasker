@@ -37,13 +37,18 @@ Goal.filter = ({ props, inners, params, strict_params, order_params }) => {
   return db(query, values);
 };
 
-Goal.delete = ({ inners, params, strict_params }) => {
-  let { query, values } = new lib.Query().delete()
-    .table("cms_tasker.goal")
-    .inners(inners)
-    .params(params)
-    .strictParams(strict_params).build();
-  return db(query, values);
+// Goal.delete = ({ inners, params, strict_params }) => {
+//   let { query, values } = new lib.Query().delete()
+//     .table("cms_tasker.goal")
+//     .inners(inners)
+//     .params(params)
+//     .strictParams(strict_params).build();
+//   return db(query, values);
+// };
+
+Goal.delete = async (id) => {
+  let query = `DELETE FROM cms_tasker.goal WHERE id = ?;`;
+  return db(query, [id]);
 };
 
 module.exports = Goal;

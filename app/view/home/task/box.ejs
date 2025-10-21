@@ -1,15 +1,45 @@
-<div id="task-box" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;"></div>
+<div id="task-container" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;">
+  <select id="task_milestone_select" class="box b1 lucida-grande bold rem09 padding-15"></select>
+  <div id="task-box" class="box b1 container max-height-400 scroll-y h-center margin-top-10">
+  </div>
+</div>
 
 <script>
   document.addEventListener("DOMContentLoaded", async () => {
+    let milestone_select_options = await API.response(Milestone.filter, {
+      status: "Pendente"
+    });
+
+    task_milestone_select.append(lib.element.create("option", {
+      value: ""
+    }, "Todas as metas"));
+
+    milestone_select_options.forEach(m => {
+      console.log(m);
+      task_milestone_select.append(lib.element.create("option", {
+        value: m.id
+      }, m.description));
+    });
+
+    task_milestone_select.addEventListener("change", async () => {
+      await updateTaskBox();
+    });
+
     await updateTaskBox();
   });
+
+
 
   updateTaskBox = async () => {
     let task_box = document.getElementById("task-box");
     task_box.innerHTML = "";
 
-    let tasks = await taskFilter({ status: 'Pendente' });
+    let tasks = await taskFilter({
+      status: 'Pendente',
+      milestone_id: task_milestone_select.value
+    });
+
+    console.log(task_milestone_select.value);
 
     tasks = lib.sort(tasks, "datetime", "desc");
 
@@ -58,7 +88,7 @@
     milestone_select.value = task.milestone_id || "";
 
     let task_text = lib.element.create("textarea", {
-      class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",
+      class: "mobile-box a1 height-100 lucida-grande rem08 border padding-3 v-center wrap",
       'data-initial_value': task.description
     }, task.description);
     task_div.append(task_text);
