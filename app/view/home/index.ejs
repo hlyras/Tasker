@@ -73,15 +73,15 @@
       let task_icon = document.getElementById("task-icon");
 
       goal_icon.addEventListener("click", async () => {
-        lib.popup(await goalCreateForm());
+        lib.popup(await goalCreateForm(), false, true);
       });
 
       milestone_icon.addEventListener("click", async () => {
-        lib.popup(await milestoneCreateForm());
+        lib.popup(await milestoneCreateForm(), false, true);
       });
 
       task_icon.addEventListener("click", async () => {
-        lib.popup(await taskCreateForm());
+        lib.popup(await taskCreateForm(), false, true);
       });
     });
   </script>
