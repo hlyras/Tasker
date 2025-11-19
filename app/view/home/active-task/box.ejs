@@ -110,21 +110,21 @@
         return lib.message("A tarefa não pode ser vazia.");
       }
 
-      lib.confirm("Deseja atualizar a tarefa?", async r => {
-        if (!r) { return; }
+      // lib.confirm("Deseja atualizar a tarefa?", async r => {
+      // if (!r) { return; }
 
-        let updated_task = {
-          id: active_task.id,
-          description: active_task_text.value,
-        };
+      let updated_task = {
+        id: active_task.id,
+        description: active_task_text.value,
+      };
 
-        let response = await API.response(Task.update, updated_task);
-        if (!response) { return; }
+      let response = await API.response(Task.update, updated_task);
+      if (!response) { return; }
 
-        lib.message(response.done, () => {
-          active_task_text.dataset.initial_value = active_task_text.value;
-        });
-      });
+      // lib.message(response.done, () => {
+      active_task_text.dataset.initial_value = active_task_text.value;
+      // });
+      // });
     });
 
     update_icon.addEventListener("click", async () => {

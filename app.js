@@ -1,6 +1,9 @@
 const express = require('express');
 const app = express();
 
+const session = require('express-session');
+const passport = require('passport');
+
 require('dotenv').config();
 
 const bodyParser = require('body-parser');
@@ -12,6 +15,17 @@ app.set('views', 'app/view');
 app.set('view engine', 'ejs');
 
 app.use(express.static('public'));
+
+// Sessão
+app.use(session({
+  secret: 'SUA_CHAVE_SECRETA',
+  resave: false,
+  saveUninitialized: false
+}));
+
+// Inicializa o Passport
+app.use(passport.initialize());
+app.use(passport.session());
 
 app.use((req, res, next) => {
   if ((req.headers["x-forwarded-proto"] || "").endsWith("http")) {

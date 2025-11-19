@@ -116,20 +116,14 @@
         return lib.message("O objetivo não pode ser vazio.");
       }
 
-      lib.confirm("Deseja atualizar o objetivo?", async r => {
-        if (!r) { return; }
+      let updated_task = {
+        id: task.id,
+        description: task_text.value
+      };
 
-        let updated_task = {
-          id: task.id,
-          description: task_text.value
-        };
+      let response = await API.response(Task.update, updated_task);
 
-        let response = await API.response(Task.update, updated_task);
-
-        lib.message(response, () => {
-          task_text.dataset.initial_value = task_text.value;
-        });
-      });
+      task_text.dataset.initial_value = task_text.value;
     });
 
     update_icon.addEventListener("click", async () => {
