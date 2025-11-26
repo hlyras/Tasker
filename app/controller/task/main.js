@@ -50,6 +50,10 @@ taskController.update = async (req, res) => {
 
 taskController.filter = async (req, res) => {
   let task_options = {
+    props: ["task.*", "milestone.description milestone_description"],
+    inners: [
+      ["cms_tasker.milestone", "milestone.id", "task.milestone_id"]
+    ],
     strict_params: { keys: [], values: [] },
     order: [['id', 'desc']]
   };

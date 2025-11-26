@@ -1,46 +1,44 @@
-<div id="task-container" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;">
-  <select id="task_milestone_select" class="box b1 lucida-grande bold rem09 padding-15"></select>
+<div id="task_container" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;">
+  <!-- <select id="task_milestone_select" class="box b1 lucida-grande bold rem09 padding-15"></select>
   <div id="task-box" class="box b1 container max-height-400 scroll-y h-center margin-top-10">
-  </div>
+  </div> -->
 </div>
 
 <script>
   document.addEventListener("DOMContentLoaded", async () => {
-    let milestone_select_options = await API.response(Milestone.filter, {
-      status: "Pendente"
+    const milestone_status_select = lib.element.create('select', {
+      id: "milestone_status_select",
+      class: "box b2-3 lucida-grande bold rem09 padding-10"
     });
+    task_container.append(milestone_status_select);
 
-    task_milestone_select.append(lib.element.create("option", {
-      value: ""
-    }, "Todas as metas"));
+    milestone_status_select.append(lib.element.create("option", {
+      value: "Pendente"
+    }, "Pendente"));
 
-    milestone_select_options.forEach(m => {
-      console.log(m);
-      task_milestone_select.append(lib.element.create("option", {
-        value: m.id
-      }, m.description));
+    milestone_status_select.append(lib.element.create("option", {
+      value: "Concluído"
+    }, "Concluído"));
+
+    const task_box = lib.element.create('div', {
+      id: "task_box",
+      class: "box b1 container margin-top-10 h-center"
     });
+    task_container.append(task_box);
 
-    task_milestone_select.addEventListener("change", async () => {
+    milestone_status_select.addEventListener("change", async () => {
       await updateTaskBox();
     });
 
     await updateTaskBox();
   });
 
-
-
   updateTaskBox = async () => {
-    let task_box = document.getElementById("task-box");
     task_box.innerHTML = "";
 
     let tasks = await taskFilter({
-      status: 'Pendente',
-      milestone_id: task_milestone_select.value
+      status: milestone_status_select.value
     });
-
-    console.log(task_milestone_select.value);
-
     tasks = lib.sort(tasks, "datetime", "desc");
 
     if (!tasks.length) {
@@ -60,7 +58,7 @@
 
   function taskDiv(task, milestones) {
     let task_div = lib.element.create("div", {
-      class: "box b2-3 container ground border shadow-st margin-top-10 padding-3",
+      class: "mobile-box b2 container ground border shadow-st margin-top-10 padding-3",
     });
 
     let option_div = lib.element.create("div", {

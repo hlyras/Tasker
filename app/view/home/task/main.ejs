@@ -17,10 +17,9 @@
     task_header.addEventListener("click", async () => {
       let goal_box = document.getElementById("goal-box");
       let milestone_box = document.getElementById("milestone-box");
-      let task_container = document.getElementById("task-container");
       lib.display(goal_box, "none");
       lib.display(milestone_box, "none");
-      lib.displayDiv("task-container", document.getElementById("task-header"));
+      lib.displayDiv("task_container", document.getElementById("task-header"));
 
       if (task_container.style.display != "none") {
         lib.removeCss(goal_header, ["shadow-st"]);
