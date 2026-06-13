@@ -1,0 +1,181 @@
+<script>
+  async function subtaskSection(task) {
+    let section = lib.element.create("div", {
+      class: "box b1 container margin-top-5 padding-5 border-top"
+    });
+
+    let title = lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 margin-bottom-5"
+    }, "Subtarefas");
+    section.append(title);
+
+    let container = lib.element.create("div", {
+      id: `subtask-container-${task.id}`,
+      class: "box b1 container subtask-container"
+    });
+    section.append(container);
+
+    let add_row = lib.element.create("div", {
+      class: "box b1 container margin-top-5"
+    });
+    section.append(add_row);
+
+    let add_input = lib.element.create("input", {
+      type: "text",
+      class: "mobile-box b4-5 lucida-grande rem08 border padding-5",
+      placeholder: "Nova subtarefa..."
+    });
+    add_row.append(add_input);
+
+    let add_button = lib.element.create("button", {
+      class: "mobile-box b5 lucida-grande rem08 border padding-5 pointer ground"
+    }, "+");
+    add_row.append(add_button);
+
+    add_button.addEventListener("click", async () => {
+      await createSubtask(task.id, add_input, container);
+    });
+
+    add_input.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") { return; }
+      await createSubtask(task.id, add_input, container);
+    });
+
+    let subtasks = await API.response(Subtask.filter, { task_id: task.id });
+    if (!subtasks) { return section; }
+
+    subtasks.forEach(subtask => {
+      let subtask_div = subtaskDiv(subtask, task.id, container);
+      container.append(subtask_div);
+    });
+
+    return section;
+  }
+
+  async function createSubtask(task_id, add_input, container) {
+    if (!add_input.value.trim()) {
+      return lib.message("Informe a descrição da subtarefa.");
+    }
+
+    let sort_order = container.children.length + 1;
+
+    let response = await API.response(Subtask.create, {
+      task_id,
+      description: add_input.value.trim(),
+      sort_order
+    });
+
+    if (!response || !response.subtask) { return; }
+
+    let subtask_div = subtaskDiv(response.subtask, task_id, container);
+    container.append(subtask_div);
+    add_input.value = "";
+  }
+
+  async function updateSubtaskOrder(container) {
+    let subtask_divs = container.children;
+
+    for (let i in subtask_divs) {
+      if (!subtask_divs[i].id) { continue; }
+
+      let subtask_id = subtask_divs[i].id.replace("subtask-", "");
+
+      await API.response(Subtask.update, {
+        id: subtask_id,
+        sort_order: parseInt(i) + 1
+      }, "none");
+    }
+  }
+
+  function subtaskDiv(subtask, task_id, container) {
+    let subtask_div = lib.element.create("div", {
+      class: "box b1 container subtask-item ground border padding-3 margin-top-3"
+    });
+
+    subtask_div.id = `subtask-${subtask.id}`;
+
+    let done_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
+      "18", "/images/icon/done.png");
+    if (subtask.status === "Concluído") {
+      done_icon.classList.add("opacity-out-04");
+    }
+    subtask_div.append(done_icon);
+
+    let description_input = lib.element.create("input", {
+      type: "text",
+      class: `mobile-box b7-10 lucida-grande rem08 border padding-3 v-center ${subtask.status === "Concluído" ? "line-through opacity-out-06" : ""}`,
+      'data-initial_value': subtask.description,
+      value: subtask.description
+    });
+    subtask_div.append(description_input);
+
+    let delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
+      "18", "/images/icon/trash.png");
+    subtask_div.append(delete_icon);
+
+    let move_icon = lib.element.svg("mobile-box b10 opacity-out-08 h-center grab", "20",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+    subtask_div.append(move_icon);
+
+    lib.drag.element(subtask_div, async () => {
+      await updateSubtaskOrder(container);
+    }, move_icon, "v");
+
+    lib.drag.drop(subtask_div, null, "drag-over", "v");
+
+    description_input.addEventListener("blur", async () => {
+      if (description_input.value === description_input.dataset.initial_value) {
+        return;
+      }
+
+      if (!description_input.value.trim()) {
+        description_input.value = description_input.dataset.initial_value;
+        return lib.message("A subtarefa não pode ser vazia.");
+      }
+
+      let response = await API.response(Subtask.update, {
+        id: subtask.id,
+        description: description_input.value.trim()
+      });
+
+      if (!response) { return; }
+      description_input.dataset.initial_value = description_input.value;
+    });
+
+    done_icon.addEventListener("click", async () => {
+      let new_status = subtask.status === "Concluído" ? "Pendente" : "Concluído";
+
+      let response = await API.response(Subtask.update, {
+        id: subtask.id,
+        status: new_status
+      });
+
+      if (!response) { return; }
+
+      subtask.status = new_status;
+
+      if (new_status === "Concluído") {
+        description_input.classList.add("line-through", "opacity-out-06");
+        done_icon.classList.add("opacity-out-04");
+      } else {
+        description_input.classList.remove("line-through", "opacity-out-06");
+        done_icon.classList.remove("opacity-out-04");
+      }
+    });
+
+    delete_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja excluir a subtarefa?", async r => {
+        if (r) { return; }
+
+        let response = await API.response(Subtask.delete, subtask.id);
+        lib.message(response, async () => {
+          subtask_div.remove();
+          await updateSubtaskOrder(container);
+        });
+      }, "Não excluir", "Excluir subtarefa");
+    });
+
+    return subtask_div;
+  }
+</script>

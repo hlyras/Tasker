@@ -39,18 +39,13 @@ Milestone.filter = ({ props, inners, params, strict_params, order_params }) => {
   return db(query, values);
 };
 
-// Milestone.delete = ({ inners, params, strict_params }) => {
-//   let { query, values } = new lib.Query().delete()
-//     .table("cms_tasker.milestone")
-//     .inners(inners)
-//     .params(params)
-//     .strictParams(strict_params).build();
-//   return db(query, values);
-// }
-
-Milestone.delete = async (id) => {
-  let query = `DELETE FROM cms_tasker.milestone WHERE id = ?;`;
-  return db(query, [id]);
-};
+Milestone.delete = ({ inners, params, strict_params }) => {
+  let { query, values } = new lib.Query().delete()
+    .table("cms_tasker.milestone")
+    .inners(inners)
+    .params(params)
+    .strictParams(strict_params).build();
+  return db(query, values);
+}
 
 module.exports = Milestone;

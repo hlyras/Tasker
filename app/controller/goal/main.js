@@ -70,6 +70,8 @@ goalController.delete = async (req, res) => {
       return res.send({ msg: "O id do objetivo deve ser um número." });
     }
 
+    console.log('delete controller ---------------')
+
     let response = await Goal.delete({
       strict_params: {
         keys: ['id'], values: [req.params.id]

@@ -26,6 +26,9 @@
         <img id="calendar-icon"
           class='image-prop size-30 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
           src='/images/icon/calendar.png'>
+        <img id="workout-icon"
+          class='image-prop size-30 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
+          src='/images/icon/workout.png'>
         <img id="shop-icon"
           class='image-prop size-30 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
           src='/images/icon/shop.png'>
@@ -52,6 +55,7 @@
         <div class="box b1 container margin-top-5">
           <%- include('./goal/box.ejs') %>
           <%- include('./milestone/box.ejs') %>
+          <%- include('./subtask/box.ejs') %>
           <%- include('./task/box.ejs') %>
         </div>
       </div>
@@ -65,6 +69,7 @@
   <script src="/js/goal/main.js"></script>
   <script src="/js/milestone/main.js"></script>
   <script src="/js/task/main.js"></script>
+  <script src="/js/subtask/main.js"></script>
 
   <script>
     document.addEventListener('DOMContentLoaded', async function () {

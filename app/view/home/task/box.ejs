@@ -172,6 +172,10 @@
       }, "Não excluir", "Excluir tarefa");
     });
 
+    subtaskSection(task).then(subtask_section => {
+      task_div.append(subtask_section);
+    });
+
     return task_div;
   }
 

@@ -40,18 +40,139 @@
     });
 
     let description = lib.element.create("textarea", {
-      class: "box b1 height-150 padding-5 radius-1 margin-top-5",
+      class: "box b1 height-500 padding-5 radius-1 margin-top-5",
       placeholder: "Descreva a tarefa"
     });
     task_create_form.append(description);
 
+    description.value = localStorage.getItem("tasker-description") || "";
+
     let submit = lib.element.create("button", {
       class: "box b4 btn-act lucida-grande bold noborder padding-10 margin-top-5 pointer noselect"
-    }, "Criar meta");
+    }, "Criar Tarefa");
     task_create_form.append(submit);
+
+    description.addEventListener("keydown", function (e) {
+      // CTRL + D
+      if (e.ctrlKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        const value = this.value;
+
+        // Início da linha
+        const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+
+        // Fim da linha
+        let lineEnd = value.indexOf("\n", end);
+
+        if (lineEnd === -1) {
+          lineEnd = value.length;
+        }
+
+        // Linha atual
+        let line = value.slice(lineStart, lineEnd);
+
+        // Detecta número no começo da linha
+        line = line.replace(/^(\d+)(\s*-\s*)/, function (_, num, separator) {
+          return (parseInt(num) + 1) + separator;
+        });
+
+        // Insere linha duplicada abaixo
+        const insertText = "\n" + line;
+
+        this.value =
+          value.slice(0, lineEnd) +
+          insertText +
+          value.slice(lineEnd);
+
+        // Move cursor
+        const newCursor = lineEnd + insertText.length;
+
+        this.selectionStart = newCursor;
+        this.selectionEnd = newCursor;
+      }
+    });
+
+    description.addEventListener("dblclick", function () {
+      const start = this.selectionStart;
+      const end = this.selectionEnd;
+
+      let selected = this.value.slice(start, end);
+
+      // Remove espaço no final da seleção
+      if (selected.endsWith(" ")) {
+        this.selectionEnd = end - 1;
+      }
+    });
+
+    description.addEventListener("input", function () {
+      localStorage.setItem("tasker-description", description.value);
+    });
+
+    description.addEventListener("keydown", function (e) {
+      // TAB ou SHIFT + TAB
+      if (e.key === "Tab") {
+        e.preventDefault();
+
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        const value = this.value;
+
+        const tab = "  "; // 2 espaços
+
+        // Descobre início da primeira linha selecionada
+        const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+
+        // Descobre fim da última linha selecionada
+        let lineEnd = value.indexOf("\n", end);
+
+        if (lineEnd === -1) {
+          lineEnd = value.length;
+        }
+
+        const before = value.slice(0, lineStart);
+        const selected = value.slice(lineStart, lineEnd);
+        const after = value.slice(lineEnd);
+
+        let lines = selected.split("\n");
+
+        // SHIFT + TAB → remover indentação
+        if (e.shiftKey) {
+          lines = lines.map(line => {
+            if (line.startsWith(tab)) {
+              return line.slice(tab.length);
+            }
+
+            if (line.startsWith(" ")) {
+              return line.slice(1);
+            }
+
+            return line;
+          });
+        }
+
+        // TAB → adicionar indentação
+        else {
+          lines = lines.map(line => tab + line);
+        }
+
+        const newSelected = lines.join("\n");
+
+        this.value = before + newSelected + after;
+
+        this.selectionStart = lineStart;
+        this.selectionEnd = lineStart + newSelected.length;
+      }
+    });
 
     task_create_form.addEventListener("submit", async e => {
       e.preventDefault();
+
+      if (!milestone_select.value) {
+        return lib.message("É necessário selecionar uma meta");
+      }
 
       let task = {
         milestone_id: milestone_select.value ? milestone_select.value : null,
@@ -62,9 +183,10 @@
       task.id = response.task.id;
 
       lib.message(response.done, () => {
-        let task_box = document.getElementById("task-box");
-        task_box.append(taskDiv(task, milestones));
+        task_box.prepend(taskDiv(task, milestones));
 
+        description.value = "";
+        localStorage.removeItem("tasker-description");
         lib.popout(task_create_form);
       });
     });

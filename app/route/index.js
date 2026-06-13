@@ -5,15 +5,15 @@ const passport = require('../../config/passport');
 console.log("CallbackURL:", `${process.env.BASE_URL}/auth/google/callback`);
 
 router.get('/', (req, res) => {
-  const { login_error } = req.query;
+  // const { login_error } = req.query;
 
-  if (login_error) {
-    console.log("Falha no login via Google:", login_error);
-  }
+  // if (login_error) {
+  //   console.log("Falha no login via Google:", login_error);
+  // }
 
   if (req.isAuthenticated()) {
-    return res.render('home/index');
   }
+  return res.render('home/index');
 
   return res.render('landing/index', { login_error });
 });
@@ -48,5 +48,6 @@ router.get('/auth/google/callback', (req, res, next) => {
 router.use("/goal", require("./goal"));
 router.use("/milestone", require("./milestone"));
 router.use("/task", require("./task"));
+router.use("/subtask", require("./subtask"));
 
 module.exports = router;
