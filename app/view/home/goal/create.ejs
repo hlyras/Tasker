@@ -40,11 +40,12 @@
       let response = await API.response(Goal.create, goal);
       goal.id = response.goal.id;
 
-      lib.message(response.done, () => {
-        let goal_box = document.getElementById("goal-box");
-        goal_box.append(goalDiv(goal));
+      lib.message(response.done, async () => {
+        if (typeof updateGoalBox === "function") {
+          await updateGoalBox();
+        }
 
-        document.querySelectorAll('.goal-select').forEach(select => {
+        document.querySelectorAll(".goal-select").forEach(select => {
           select.append(lib.element.create("option", {
             value: goal.id
           }, goal.description));

@@ -1,0 +1,143 @@
+<script>
+  async function diaryPopup() {
+    const popup = lib.element.create("div", {
+      class: "box b1 container diary-popup padding-10"
+    });
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Diário"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/diary.png"
+    }));
+
+    const notes_box = lib.element.create("div", {
+      id: "diary-notes-box",
+      class: "box b1 container diary-notes-box scroll-y-auto margin-bottom-10"
+    });
+    popup.append(notes_box);
+
+    const create_box = lib.element.create("div", {
+      class: "box b1 container diary-create-box ground border padding-10"
+    });
+    popup.append(create_box);
+
+    create_box.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 margin-bottom-5"
+    }, "Nova anotação"));
+
+    const content_input = lib.element.create("textarea", {
+      class: "box b1 height-100 lucida-grande rem08 border padding-5 wrap",
+      placeholder: "Escreva aqui algo que queira consultar no futuro..."
+    });
+    create_box.append(content_input);
+
+    const save_button = lib.element.create("button", {
+      type: "button",
+      class: "box b4 btn-act lucida-grande bold noborder padding-10 margin-top-5 pointer noselect"
+    }, "Salvar anotação");
+    create_box.append(save_button);
+
+    const renderNotes = async () => {
+      notes_box.innerHTML = "";
+
+      const notes = await API.response(Note.filter, {});
+      if (!notes) { return; }
+
+      if (!notes.length) {
+        notes_box.append(lib.element.create("div", {
+          class: "box b1 lucida-grande bold padding-20 center opacity-out-08"
+        }, "Nenhuma anotação"));
+        return;
+      }
+
+      notes.forEach(note => {
+        notes_box.append(noteDiv(note, renderNotes));
+      });
+    };
+
+    save_button.addEventListener("click", async () => {
+      const content = content_input.value.trim();
+      if (!content) {
+        return lib.message("A anotação não pode ser vazia.");
+      }
+
+      const response = await API.response(Note.create, { content });
+      if (!response) { return; }
+
+      content_input.value = "";
+      lib.message(response.done, async () => {
+        await renderNotes();
+      });
+    });
+
+    await renderNotes();
+
+    return popup;
+  }
+
+  function noteDiv(note, onRefresh) {
+    const note_div = lib.element.create("div", {
+      class: "box b1 container diary-note-item ground border padding-5 margin-bottom-10"
+    });
+
+    const header = lib.element.create("div", {
+      class: "mobile-box container padding-3"
+    });
+    note_div.append(header);
+
+    header.append(lib.element.create("div", {
+      class: "mobile-box a1 lucida-grande rem07 opacity-out-08 v-center"
+    }, lib.timestampToDatetime(note.datetime)));
+
+    const delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
+      "18", "/images/icon/trash.png");
+    header.append(delete_icon);
+
+    const note_text = lib.element.create("textarea", {
+      class: "box b1 height-80 lucida-grande rem08 border padding-5 wrap margin-top-5",
+      'data-initial_value': note.content
+    }, note.content);
+    note_div.append(note_text);
+
+    note_text.addEventListener("blur", async () => {
+      if (note_text.value === note_text.dataset.initial_value) {
+        return;
+      }
+
+      if (!note_text.value.trim()) {
+        note_text.value = note_text.dataset.initial_value;
+        return lib.message("A anotação não pode ser vazia.");
+      }
+
+      const response = await API.response(Note.update, {
+        id: note.id,
+        content: note_text.value.trim()
+      });
+
+      if (!response) { return; }
+
+      note_text.dataset.initial_value = note_text.value.trim();
+    });
+
+    delete_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja excluir a anotação?", async r => {
+        if (r) { return; }
+
+        const response = await API.response(Note.delete, note.id);
+        lib.message(response, async () => {
+          await onRefresh();
+        });
+      }, "Não excluir", "Excluir anotação");
+    });
+
+    return note_div;
+  }
+</script>

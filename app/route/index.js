@@ -49,5 +49,8 @@ router.use("/goal", require("./goal"));
 router.use("/milestone", require("./milestone"));
 router.use("/task", require("./task"));
 router.use("/subtask", require("./subtask"));
+router.use("/note", require("./note"));
+router.use("/workout", require("./workout"));
+router.use("/avulsa", require("./avulsa"));
 
 module.exports = router;

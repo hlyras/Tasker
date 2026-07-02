@@ -1,13 +1,51 @@
-<div id="goal-box" class="box b1 container max-height-400 scroll-y h-center padding-10 margin-top-10"
-  style="display: none;"></div>
+<%- include('./create.ejs') %>
 
 <script>
-  document.addEventListener("DOMContentLoaded", async () => {
+  let goal_box = null;
+
+  async function goalPopup() {
+    const popup = lib.element.create("div", {
+      class: "box b1 container goal-popup padding-10"
+    });
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Objetivos"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/goal.webp"
+    }));
+
+    const create_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 btn-act lucida-grande bold noborder padding-8 margin-bottom-10 pointer noselect"
+    }, "Novo objetivo");
+    popup.append(create_button);
+
+    create_button.addEventListener("click", async () => {
+      lib.popup(await goalCreateForm(), false, true);
+    });
+
+    goal_box = lib.element.create("div", {
+      id: "goal_box",
+      class: "box b1 container goal-popup-list scroll-y-auto h-center"
+    });
+    popup.append(goal_box);
+
     await updateGoalBox();
-  });
+
+    return popup;
+  }
 
   async function updateGoalBox() {
-    let goal_box = document.getElementById("goal-box");
+    if (!goal_box) { return; }
+
     goal_box.innerHTML = "";
 
     let goals = await goalFilter({});
@@ -23,7 +61,7 @@
       let goal_div = goalDiv(goal);
       goal_box.append(goal_div);
     });
-  };
+  }
 
   function goalDiv(goal) {
     let goal_div = lib.element.create("div", {
@@ -57,7 +95,6 @@
     }, goal.description);
     goal_div.append(goal_text);
 
-    // events
     goal_text.addEventListener("blur", async () => {
       if (goal_text.value === goal_text.dataset.initial_value) {
         return;
@@ -113,12 +150,12 @@
     });
 
     return goal_div;
-  };
+  }
 
   async function goalFilter(goal) {
     let goals = await API.response(Goal.filter, goal);
     if (!goals) { return false; }
 
     return goals;
-  };
+  }
 </script>

@@ -1,16 +1,43 @@
-<div id="task_container" class="box b1 container max-height-400 scroll-y h-center margin-top-10" style="display: none;">
-  <!-- <select id="task_milestone_select" class="box b1 lucida-grande bold rem09 padding-15"></select>
-  <div id="task-box" class="box b1 container max-height-400 scroll-y h-center margin-top-10">
-  </div> -->
-</div>
+<%- include('./create.ejs') %>
 
 <script>
-  document.addEventListener("DOMContentLoaded", async () => {
-    const milestone_status_select = lib.element.create('select', {
-      id: "milestone_status_select",
-      class: "box b2-3 lucida-grande bold rem09 padding-10"
+  let task_box = null;
+  let milestone_status_select = null;
+  let taskPopupRefresh = null;
+
+  async function taskPopup() {
+    const popup = lib.element.create("div", {
+      class: "box b1 container task-popup padding-10"
     });
-    task_container.append(milestone_status_select);
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Tarefas"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/task.png"
+    }));
+
+    const create_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 btn-act lucida-grande bold noborder padding-8 margin-bottom-10 pointer noselect"
+    }, "Nova tarefa");
+    popup.append(create_button);
+
+    create_button.addEventListener("click", async () => {
+      lib.popup(await taskCreateForm(), false, true);
+    });
+
+    milestone_status_select = lib.element.create("select", {
+      class: "box b1 lucida-grande bold rem09 padding-10 margin-bottom-10"
+    });
+    popup.append(milestone_status_select);
 
     milestone_status_select.append(lib.element.create("option", {
       value: "Pendente"
@@ -20,20 +47,25 @@
       value: "Concluído"
     }, "Concluído"));
 
-    const task_box = lib.element.create('div', {
+    task_box = lib.element.create("div", {
       id: "task_box",
-      class: "box b1 container margin-top-10 h-center"
+      class: "box b1 container task-popup-list scroll-y-auto h-center"
     });
-    task_container.append(task_box);
+    popup.append(task_box);
 
     milestone_status_select.addEventListener("change", async () => {
       await updateTaskBox();
     });
 
+    taskPopupRefresh = updateTaskBox;
     await updateTaskBox();
-  });
+
+    return popup;
+  }
 
   updateTaskBox = async () => {
+    if (!task_box) { return; }
+
     task_box.innerHTML = "";
 
     let tasks = await taskFilter({
@@ -103,7 +135,24 @@
       "20", "/images/icon/done.png");
     option_div.append(done_icon);
 
-    // events
+    done_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja concluir a tarefa?", async r => {
+        if (!r) { return; }
+
+        let updated_task = {
+          id: task.id,
+          status: "Concluído"
+        };
+
+        let response = await API.response(Task.update, updated_task);
+        if (!response.done) { return; }
+
+        lib.message(response.done, () => {
+          task_div.remove();
+        });
+      });
+    });
+
     task_text.addEventListener("blur", async () => {
       if (task_text.value === task_text.dataset.initial_value) {
         return;

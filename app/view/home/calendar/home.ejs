@@ -1,0 +1,46 @@
+<div class="box b1 container margin-top-5">
+  <div id="calendar-day-tabs" class="calendar-day-tabs mobile-box container margin-bottom-10"></div>
+  <div id="calendar-home-container" class="box b1 container calendar-home"></div>
+</div>
+
+<script>
+  var calendarHomeDayIndex = 0;
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    calendarBuildHomeDayTabs();
+    await calendarInitHome();
+  });
+
+  function calendarBuildHomeDayTabs() {
+    const tabs_container = document.getElementById("calendar-day-tabs");
+    if (!tabs_container) { return; }
+
+    tabs_container.innerHTML = "";
+    const days = calendarGetDays();
+
+    days.forEach((day, index) => {
+      const tab = lib.element.create("button", {
+        type: "button",
+        class: "calendar-day-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8"
+      }, calendarDayLabel(day));
+
+      if (index > 0) {
+        tab.classList.add("margin-left-5");
+      }
+
+      tab.addEventListener("click", async () => {
+        if (calendarHomeDayIndex === index) { return; }
+        await calendarRenderHomeDay(index);
+      });
+
+      tabs_container.append(tab);
+    });
+  }
+
+  function calendarUpdateHomeDayTabs() {
+    const tabs = document.querySelectorAll("#calendar-day-tabs .calendar-day-tab");
+    tabs.forEach((tab, index) => {
+      tab.classList.toggle("calendar-day-tab-active", index === calendarHomeDayIndex);
+    });
+  }
+</script>

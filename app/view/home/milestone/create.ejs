@@ -60,11 +60,12 @@
       let response = await API.response(Milestone.create, milestone);
       milestone.id = response.milestone.id;
 
-      lib.message(response.done, () => {
-        let milestone_box = document.getElementById("milestone-box");
-        milestone_box.append(milestoneDiv(milestone, goals));
+      lib.message(response.done, async () => {
+        if (typeof updateMilestoneBox === "function") {
+          await updateMilestoneBox();
+        }
 
-        document.querySelectorAll('.milestone-select').forEach(select => {
+        document.querySelectorAll(".milestone-select").forEach(select => {
           select.append(lib.element.create("option", {
             value: milestone.id
           }, milestone.description));

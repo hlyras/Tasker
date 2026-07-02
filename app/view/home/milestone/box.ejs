@@ -1,14 +1,51 @@
-<div id="milestone-box" class="box b1 container max-height-400 scroll-y h-center padding-10 margin-top-10"
-  style="display: none;">
-</div>
+<%- include('./create.ejs') %>
 
 <script>
-  document.addEventListener("DOMContentLoaded", async () => {
+  let milestone_box = null;
+
+  async function milestonePopup() {
+    const popup = lib.element.create("div", {
+      class: "box b1 container milestone-popup padding-10"
+    });
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Metas"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/milestone.png"
+    }));
+
+    const create_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 btn-act lucida-grande bold noborder padding-8 margin-bottom-10 pointer noselect"
+    }, "Nova meta");
+    popup.append(create_button);
+
+    create_button.addEventListener("click", async () => {
+      lib.popup(await milestoneCreateForm(), false, true);
+    });
+
+    milestone_box = lib.element.create("div", {
+      id: "milestone_box",
+      class: "box b1 container milestone-popup-list scroll-y-auto h-center"
+    });
+    popup.append(milestone_box);
+
     await updateMilestoneBox();
-  });
+
+    return popup;
+  }
 
   async function updateMilestoneBox() {
-    let milestone_box = document.getElementById("milestone-box");
+    if (!milestone_box) { return; }
+
     milestone_box.innerHTML = "";
 
     let milestones = await milestoneFilter({
@@ -28,14 +65,14 @@
       let milestone_div = milestoneDiv(milestone, goals);
       milestone_box.append(milestone_div);
     });
-  };
+  }
 
   async function milestoneFilter(milestone) {
     let milestones = await API.response(Milestone.filter, milestone);
     if (!milestones) { return false; }
 
     return milestones;
-  };
+  }
 
   function milestoneDiv(milestone, goals) {
     let milestone_div = lib.element.create("div", {
@@ -80,7 +117,6 @@
     }, milestone.description);
     milestone_div.append(milestone_text);
 
-    // events
     milestone_text.addEventListener("blur", async () => {
       if (milestone_text.value === milestone_text.dataset.initial_value) {
         return;
@@ -150,5 +186,5 @@
     });
 
     return milestone_div;
-  };
+  }
 </script>

@@ -182,8 +182,10 @@
       let response = await API.response(Task.create, task);
       task.id = response.task.id;
 
-      lib.message(response.done, () => {
-        task_box.prepend(taskDiv(task, milestones));
+      lib.message(response.done, async () => {
+        if (typeof updateTaskBox === "function") {
+          await updateTaskBox();
+        }
 
         description.value = "";
         localStorage.removeItem("tasker-description");

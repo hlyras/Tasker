@@ -48,15 +48,16 @@
   <section class="container margin-top-20 margin-bottom-20 h-center">
     <div class="box b2-3 container ground padding-15 border margin-bottom-200 ">
       <div class="box b1 container">
-        <%- include('./goal/main.ejs') %>
-        <%- include('./milestone/main.ejs') %>
-        <%- include('./task/main.ejs') %>
+        <%- include('./calendar/home.ejs') %>
+        <%- include('./calendar/main.ejs') %>
+        <%- include('./note/main.ejs') %>
+        <%- include('./workout/main.ejs') %>
 
         <div class="box b1 container margin-top-5">
-          <%- include('./goal/box.ejs') %>
-          <%- include('./milestone/box.ejs') %>
           <%- include('./subtask/box.ejs') %>
           <%- include('./task/box.ejs') %>
+          <%- include('./goal/box.ejs') %>
+          <%- include('./milestone/box.ejs') %>
         </div>
       </div>
 
@@ -70,23 +71,41 @@
   <script src="/js/milestone/main.js"></script>
   <script src="/js/task/main.js"></script>
   <script src="/js/subtask/main.js"></script>
+  <script src="/js/note/main.js"></script>
+  <script src="/js/workout/main.js"></script>
+  <script src="/js/avulsa/main.js"></script>
 
   <script>
     document.addEventListener('DOMContentLoaded', async function () {
       let goal_icon = document.getElementById("goal-icon");
       let milestone_icon = document.getElementById("milestone-icon");
       let task_icon = document.getElementById("task-icon");
+      let calendar_icon = document.getElementById("calendar-icon");
+      let diary_icon = document.getElementById("diary-icon");
+      let workout_icon = document.getElementById("workout-icon");
 
       goal_icon.addEventListener("click", async () => {
-        lib.popup(await goalCreateForm(), false, true);
+        lib.popup(await goalPopup(), false, true);
       });
 
       milestone_icon.addEventListener("click", async () => {
-        lib.popup(await milestoneCreateForm(), false, true);
+        lib.popup(await milestonePopup(), false, true);
       });
 
       task_icon.addEventListener("click", async () => {
-        lib.popup(await taskCreateForm(), false, true);
+        lib.popup(await taskPopup(), false, true);
+      });
+
+      calendar_icon.addEventListener("click", async () => {
+        lib.popup(await calendarPopup(), false, true);
+      });
+
+      diary_icon.addEventListener("click", async () => {
+        lib.popup(await diaryPopup(), false, true);
+      });
+
+      workout_icon.addEventListener("click", async () => {
+        lib.popup(await workoutPopup(), false, true);
       });
     });
   </script>

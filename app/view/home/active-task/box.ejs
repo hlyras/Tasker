@@ -139,16 +139,21 @@
         let response = await API.response(Task.update, updated_task);
         if (!response.done) { return; }
 
-        let task_box = document.getElementById("task-box");
+        let active_task_box = document.getElementById("active-task-box");
 
         active_task.status = "Pendente";
 
-        let task_div = taskDiv({
-          ...active_task,
-        }, milestones);
-
-        task_box.append(task_div);
         active_task_div.remove();
+
+        if (!active_task_box.children.length) {
+          active_task_box.append(lib.element.create("div", {
+            class: "box b1 lucida-grande bold padding-20 center"
+          }, "Nenhuma tarefa"));
+        }
+
+        if (typeof updateTaskBox === "function") {
+          await updateTaskBox();
+        }
       });
     });
 
