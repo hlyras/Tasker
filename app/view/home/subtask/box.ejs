@@ -20,9 +20,8 @@
     });
     section.append(add_row);
 
-    let add_input = lib.element.create("input", {
-      type: "text",
-      class: "mobile-box b4-5 lucida-grande rem08 border padding-5",
+    let add_input = lib.element.create("textarea", {
+      class: "mobile-box b4-5 lucida-grande rem08 border padding-5 wrap",
       placeholder: "Nova subtarefa..."
     });
     add_row.append(add_input);
@@ -33,11 +32,6 @@
     add_row.append(add_button);
 
     add_button.addEventListener("click", async () => {
-      await createSubtask(task.id, add_input, container);
-    });
-
-    add_input.addEventListener("keydown", async (e) => {
-      if (e.key !== "Enter") { return; }
       await createSubtask(task.id, add_input, container);
     });
 
@@ -94,26 +88,24 @@
 
     subtask_div.id = `subtask-${subtask.id}`;
 
-    let done_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
+    let description_input = lib.element.create("textarea", {
+      class: `mobile-box b7-10 lucida-grande rem08 border padding-3 v-center wrap ${subtask.status === "Concluído" ? "line-through opacity-out-06" : ""}`,
+      'data-initial_value': subtask.description
+    }, subtask.description);
+    subtask_div.append(description_input);
+
+    let delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
+      "18", "/images/icon/trash.png");
+    subtask_div.append(delete_icon);
+
+    let done_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
       "18", "/images/icon/done.png");
     if (subtask.status === "Concluído") {
       done_icon.classList.add("opacity-out-04");
     }
     subtask_div.append(done_icon);
 
-    let description_input = lib.element.create("input", {
-      type: "text",
-      class: `mobile-box b7-10 lucida-grande rem08 border padding-3 v-center ${subtask.status === "Concluído" ? "line-through opacity-out-06" : ""}`,
-      'data-initial_value': subtask.description,
-      value: subtask.description
-    });
-    subtask_div.append(description_input);
-
-    let delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
-      "18", "/images/icon/trash.png");
-    subtask_div.append(delete_icon);
-
-    let move_icon = lib.element.svg("mobile-box b10 opacity-out-08 h-center grab", "20",
+    let move_icon = lib.element.svg("mobile-box b10 opacity-out-08 v-center grab", "18",
       `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
     );
     subtask_div.append(move_icon);

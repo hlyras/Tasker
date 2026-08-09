@@ -8,6 +8,7 @@ goalController.create = async (req, res) => {
   let goal = new Goal();
   goal.datetime = lib.date.timestamp.generate();
   goal.description = req.body.description;
+  goal.sort_order = req.body.sort_order || 0;
 
   try {
     let goal_response = await goal.create();
@@ -31,6 +32,7 @@ goalController.update = async (req, res) => {
   goal.id = req.body.id;
   goal.description = req.body.description;
   goal.status = req.body.status;
+  goal.sort_order = req.body.sort_order;
 
   try {
     let goal_response = await goal.update();
@@ -48,8 +50,15 @@ goalController.update = async (req, res) => {
 };
 
 goalController.filter = async (req, res) => {
+  let goal_options = {
+    strict_params: { keys: [], values: [] },
+    order_params: [['sort_order', 'asc'], ['id', 'asc']]
+  };
+
+  lib.Query.fillParam("goal.status", req.body.status, goal_options.strict_params);
+
   try {
-    let goals = await Goal.filter({ order: [['id', 'desc']] });
+    let goals = await Goal.filter(goal_options);
 
     return res.send({ goals });
   } catch (error) {

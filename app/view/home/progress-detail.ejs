@@ -1,0 +1,155 @@
+<script>
+  async function progressDetailPopup({
+    title,
+    icon,
+    empty_pending,
+    empty_completed,
+    getItems
+  }) {
+    const popup = lib.element.create("div", {
+      class: "box b1 container goal-popup padding-10"
+    });
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center wrap"
+    }, title));
+
+    if (icon) {
+      title_box.append(lib.element.create("img", {
+        class: "image-prop size-25",
+        src: icon
+      }));
+    }
+
+    const tabs_box = lib.element.create("div", {
+      class: "calendar-picker-tabs mobile-box container margin-bottom-10",
+      style: "flex-wrap: nowrap; width: 100%;"
+    });
+    popup.append(tabs_box);
+
+    const pending_tab = lib.element.create("button", {
+      type: "button",
+      class: "calendar-picker-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8"
+    }, "Pendentes");
+    tabs_box.append(pending_tab);
+
+    const completed_tab = lib.element.create("button", {
+      type: "button",
+      class: "calendar-picker-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8 margin-left-5"
+    }, "Concluídas");
+    tabs_box.append(completed_tab);
+
+    const list = lib.element.create("div", {
+      class: "box b1 container goal-popup-list scroll-y-auto h-center"
+    });
+    popup.append(list);
+
+    let active_tab = "pending";
+
+    const setActiveTab = (tab) => {
+      active_tab = tab;
+      pending_tab.classList.toggle("calendar-picker-tab-active", tab === "pending");
+      completed_tab.classList.toggle("calendar-picker-tab-active", tab === "completed");
+    };
+
+    const renderList = async () => {
+      list.innerHTML = "";
+      const items = await getItems(active_tab);
+
+      if (!items.length) {
+        list.append(lib.element.create("div", {
+          class: "box b1 lucida-grande rem08 padding-20 center opacity-out-08"
+        }, active_tab === "pending" ? empty_pending : empty_completed));
+        return;
+      }
+
+      items.forEach(item => {
+        list.append(progressDetailItemElement(item));
+      });
+    };
+
+    pending_tab.addEventListener("click", async () => {
+      if (active_tab === "pending") { return; }
+      setActiveTab("pending");
+      await renderList();
+    });
+
+    completed_tab.addEventListener("click", async () => {
+      if (active_tab === "completed") { return; }
+      setActiveTab("completed");
+      await renderList();
+    });
+
+    setActiveTab("pending");
+    await renderList();
+
+    return popup;
+  }
+
+  function progressDetailItemElement({ description, subtitle, subtasks }) {
+    const row = lib.element.create("div", {
+      class: "box b2 container ground border shadow-st padding-5 margin-top-10"
+    });
+
+    row.append(lib.element.create("div", {
+      class: "box b1 lucida-grande rem08 bold wrap padding-3"
+    }, description));
+
+    if (subtitle) {
+      row.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem07 opacity-out-08 margin-top-3 padding-3"
+      }, subtitle));
+    }
+
+    if (subtasks && subtasks.length) {
+      const subtasks_box = lib.element.create("div", {
+        class: "box b1 container margin-top-5 padding-5 border-top"
+      });
+
+      subtasks_box.append(lib.element.create("div", {
+        class: "box b1 lucida-grande bold rem07 margin-bottom-5 opacity-out-08"
+      }, "Subtarefas"));
+
+      subtasks.forEach(subtask => {
+        const is_done = subtask.status === "Concluído";
+        subtasks_box.append(lib.element.create("div", {
+          class: `box b1 container ground border padding-3 margin-top-3 lucida-grande rem07 wrap ${is_done ? "line-through opacity-out-06" : ""}`
+        }, subtask.description));
+      });
+
+      row.append(subtasks_box);
+    }
+
+    return row;
+  }
+
+  async function buildSubtasksByTaskMap(task_ids) {
+    const map = {};
+    task_ids.forEach(task_id => {
+      map[task_id] = [];
+    });
+
+    if (!task_ids.length) {
+      return map;
+    }
+
+    const subtasks = await API.response(Subtask.filter, {}) || [];
+    subtasks.forEach(subtask => {
+      if (!map[subtask.task_id]) { return; }
+      map[subtask.task_id].push(subtask);
+    });
+
+    task_ids.forEach(task_id => {
+      map[task_id].sort((a, b) => {
+        return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id;
+      });
+    });
+
+    return map;
+  }
+</script>

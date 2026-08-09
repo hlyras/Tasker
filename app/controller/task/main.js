@@ -9,6 +9,7 @@ taskController.create = async (req, res) => {
   task.datetime = lib.date.timestamp.generate();
   task.milestone_id = req.body.milestone_id;
   task.description = req.body.description;
+  task.sort_order = req.body.sort_order || 0;
 
   try {
     let task_response = await task.create();
@@ -32,6 +33,7 @@ taskController.update = async (req, res) => {
   task.milestone_id = req.body.milestone_id;
   task.description = req.body.description;
   task.status = req.body.status;
+  task.sort_order = req.body.sort_order;
 
   try {
     let task_response = await task.update();
@@ -55,7 +57,7 @@ taskController.filter = async (req, res) => {
       ["cms_tasker.milestone", "milestone.id", "task.milestone_id"]
     ],
     strict_params: { keys: [], values: [] },
-    order: [['id', 'desc']]
+    order_params: [['sort_order', 'asc'], ['id', 'asc']]
   };
 
   lib.Query.fillParam("task.milestone_id", req.body.milestone_id, task_options.strict_params);

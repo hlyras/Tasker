@@ -9,6 +9,7 @@ milestoneController.create = async (req, res) => {
   milestone.datetime = lib.date.timestamp.generate();
   milestone.goal_id = req.body.goal_id;
   milestone.description = req.body.description;
+  milestone.sort_order = req.body.sort_order || 0;
 
   try {
     let milestone_response = await milestone.create();
@@ -33,6 +34,7 @@ milestoneController.update = async (req, res) => {
   milestone.goal_id = req.body.goal_id;
   milestone.description = req.body.description;
   milestone.status = req.body.status;
+  milestone.sort_order = req.body.sort_order;
 
   try {
     let milestone_response = await milestone.update();
@@ -52,7 +54,7 @@ milestoneController.update = async (req, res) => {
 milestoneController.filter = async (req, res) => {
   let milestone_options = {
     strict_params: { keys: [], values: [] },
-    order_params: [['id', 'desc']]
+    order_params: [['sort_order', 'asc'], ['id', 'asc']]
   };
 
   lib.Query.fillParam("milestone.status", req.body.status, milestone_options.strict_params);

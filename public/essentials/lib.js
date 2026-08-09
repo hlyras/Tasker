@@ -2390,12 +2390,16 @@ lib.element = {};
 
 lib.element.create = (elementName, attributes, value) => {
   let element = document.createElement(elementName);
-  let attributesAsArray = Object.entries(attributes);
+  let attributesAsArray = Object.entries(attributes || {});
 
   attributesAsArray.forEach(([key, value]) => element.setAttribute(key, value));
 
   // if (value) { element.textContent = value; }
   if (value) { element.innerHTML = value; }
+
+  if (String(elementName).toLowerCase() === "textarea" && typeof lib.autoResizeTextarea === "function") {
+    lib.autoResizeTextarea(element);
+  }
 
   return element;
 };
@@ -3046,14 +3050,57 @@ lib.scrollTo = (target, smooth = true, offset = 0) => {
   });
 };
 
-lib.resizeOnAttach = (element, min_height = 50) => {
+lib.autoResizeTextarea = (textarea, min_height = 0) => {
+  if (!textarea) { return; }
+
+  if (textarea.dataset.autoResizeBound === "1") {
+    return textarea._autoResize || null;
+  }
+
+  textarea.dataset.autoResizeBound = "1";
+  textarea.classList.add("auto-height-textarea");
+  textarea.style.overflowY = "hidden";
+  textarea.style.resize = "none";
+
+  if (!textarea.getAttribute("rows")) {
+    textarea.setAttribute("rows", "1");
+  }
+
+  const resize = () => {
+    textarea.style.height = "auto";
+    const next_height = Math.max(textarea.scrollHeight, min_height);
+    textarea.style.height = `${next_height}px`;
+  };
+
+  textarea.addEventListener("input", resize);
+
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+  if (descriptor && descriptor.get && descriptor.set) {
+    Object.defineProperty(textarea, "value", {
+      get() {
+        return descriptor.get.call(this);
+      },
+      set(v) {
+        descriptor.set.call(this, v);
+        requestAnimationFrame(resize);
+      },
+      configurable: true
+    });
+  }
+
   function tryResize() {
-    if (element.offsetHeight > 0) {
-      autoResizeEditableDiv(element, min_height);
+    if (textarea.offsetWidth > 0) {
+      resize();
     } else {
       requestAnimationFrame(tryResize);
     }
   }
 
   tryResize();
+  textarea._autoResize = resize;
+  return resize;
+};
+
+lib.resizeOnAttach = (element, min_height = 50) => {
+  lib.autoResizeTextarea(element, min_height);
 };

@@ -2,6 +2,7 @@
 
 <script>
   let milestone_box = null;
+  let milestone_status_select = null;
 
   async function milestonePopup() {
     const popup = lib.element.create("div", {
@@ -32,11 +33,28 @@
       lib.popup(await milestoneCreateForm(), false, true);
     });
 
+    milestone_status_select = lib.element.create("select", {
+      class: "box b1 lucida-grande bold rem09 padding-10 margin-bottom-10"
+    });
+    popup.append(milestone_status_select);
+
+    milestone_status_select.append(lib.element.create("option", {
+      value: "Pendente"
+    }, "Pendente"));
+
+    milestone_status_select.append(lib.element.create("option", {
+      value: "Concluído"
+    }, "Concluído"));
+
     milestone_box = lib.element.create("div", {
       id: "milestone_box",
       class: "box b1 container milestone-popup-list scroll-y-auto h-center"
     });
     popup.append(milestone_box);
+
+    milestone_status_select.addEventListener("change", async () => {
+      await updateMilestoneBox();
+    });
 
     await updateMilestoneBox();
 
@@ -48,9 +66,17 @@
 
     milestone_box.innerHTML = "";
 
-    let milestones = await milestoneFilter({
-      status: "Pendente"
-    });
+    let milestones = await milestoneFilter({});
+
+    if (milestone_status_select.value === "Concluído") {
+      milestones = milestones.filter(milestone => milestone.status === "Concluído");
+    } else {
+      milestones = milestones.filter(milestone => milestone.status !== "Concluído");
+    }
+
+    milestones.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+
+    const progress_map = await buildTaskProgressByMilestoneMap();
 
     if (!milestones.length) {
       milestone_box.append(lib.element.create("div", {
@@ -62,8 +88,94 @@
     let goals = await API.response(Goal.filter, {});
 
     milestones.forEach(milestone => {
-      let milestone_div = milestoneDiv(milestone, goals);
+      let milestone_div = milestoneDiv(
+        milestone,
+        goals,
+        progress_map[milestone.id],
+        milestone_status_select.value === "Concluído"
+      );
       milestone_box.append(milestone_div);
+    });
+  }
+
+  async function buildTaskProgressByMilestoneMap() {
+    const tasks = await taskFilter({}) || [];
+    const map = {};
+
+    tasks.forEach(task => {
+      const milestone_id = task.milestone_id;
+      if (!milestone_id) { return; }
+
+      if (!map[milestone_id]) {
+        map[milestone_id] = { total: 0, completed: 0 };
+      }
+
+      map[milestone_id].total++;
+      if (task.status === "Concluído") {
+        map[milestone_id].completed++;
+      }
+    });
+
+    return map;
+  }
+
+  function milestoneProgressElement(progress, milestone) {
+    const wrapper = lib.element.create("div", {
+      class: "box b1 container margin-top-5",
+      style: "padding: 0 3px 3px;"
+    });
+
+    let label = "Nenhuma tarefa cadastrada";
+    if (progress && progress.total > 0) {
+      const unit = progress.total === 1 ? "tarefa" : "tarefas";
+      label = `${progress.completed} de ${progress.total} ${unit} concluída${progress.total === 1 ? "" : "s"}`;
+    }
+
+    const label_el = lib.element.create("div", {
+      class: "box b1 lucida-grande rem07 opacity-out-08 wrap" + (progress && progress.total > 0 ? " pointer" : ""),
+      style: progress && progress.total > 0 ? "text-decoration: underline;" : ""
+    }, label);
+    wrapper.append(label_el);
+
+    if (progress && progress.total > 0) {
+      label_el.addEventListener("click", async () => {
+        lib.popup(await milestoneProgressDetailPopup(milestone), false, true);
+      });
+
+      const percent = Math.round((progress.completed / progress.total) * 100);
+      const bar = lib.element.create("div", {
+        class: "box b1 container",
+        style: "height: 4px; margin-top: 4px; background: var(--light); border-radius: 2px; overflow: hidden;"
+      });
+      bar.append(lib.element.create("div", {
+        style: `height: 100%; width: ${percent}%; background: var(--strong); border-radius: 2px;`
+      }));
+      wrapper.append(bar);
+    }
+
+    return wrapper;
+  }
+
+  async function milestoneProgressDetailPopup(milestone) {
+    return progressDetailPopup({
+      title: milestone.description,
+      icon: "/images/icon/milestone.png",
+      empty_pending: "Nenhuma tarefa pendente",
+      empty_completed: "Nenhuma tarefa concluída",
+      getItems: async (tab) => {
+        const tasks = (await taskFilter({ milestone_id: milestone.id }) || [])
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+        const filtered_tasks = tab === "pending"
+          ? tasks.filter(task => task.status !== "Concluído")
+          : tasks.filter(task => task.status === "Concluído");
+        const subtasks_map = await buildSubtasksByTaskMap(filtered_tasks.map(task => task.id));
+
+        return filtered_tasks.map(task => ({
+          description: task.description,
+          subtitle: tab === "pending" && task.status === "Em execução" ? "Em execução" : null,
+          subtasks: subtasks_map[task.id] || []
+        }));
+      }
     });
   }
 
@@ -74,10 +186,27 @@
     return milestones;
   }
 
-  function milestoneDiv(milestone, goals) {
+  async function updateMilestoneOrder(container) {
+    let milestone_divs = container.children;
+
+    for (let i in milestone_divs) {
+      if (!milestone_divs[i].id) { continue; }
+
+      let milestone_id = milestone_divs[i].id.replace("milestone-", "");
+
+      await API.response(Milestone.update, {
+        id: milestone_id,
+        sort_order: parseInt(i) + 1
+      }, "none");
+    }
+  }
+
+  function milestoneDiv(milestone, goals, progress, viewing_completed) {
     let milestone_div = lib.element.create("div", {
-      class: "box b2 container ground border shadow-st margin-top-10 padding-3",
+      class: "box b2 container ground border shadow-st margin-top-10 padding-3 sortable-item",
     });
+
+    milestone_div.id = `milestone-${milestone.id}`;
 
     let option_div = lib.element.create("div", {
       class: "container b1 right padding-3"
@@ -85,7 +214,7 @@
     milestone_div.append(option_div);
 
     let goal_select = lib.element.create("select", {
-      class: "goal-select mobile-box b8-10 lucida-grande rem08 border padding-3 v-center"
+      class: "goal-select mobile-box b7-10 lucida-grande rem08 border padding-3 v-center"
     });
     option_div.append(goal_select);
 
@@ -103,19 +232,31 @@
 
     goal_select.value = milestone.goal_id || "";
 
-    let delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
+    let delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
       "20", "/images/icon/trash.png");
     option_div.append(delete_icon);
 
-    let done_icon = lib.element.icon("b10 opacity-out-08 pointer",
-      "20", "/images/icon/done.png");
-    option_div.append(done_icon);
+    let action_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
+      "20", viewing_completed ? "/images/icon/return.png" : "/images/icon/done.png");
+    option_div.append(action_icon);
+
+    let move_icon = lib.element.svg("mobile-box b10 opacity-out-08 v-center grab", "18",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+    option_div.append(move_icon);
+
+    lib.drag.element(milestone_div, async () => {
+      await updateMilestoneOrder(milestone_box);
+    }, move_icon, "v");
+
+    lib.drag.drop(milestone_div, null, "drag-over", "v");
 
     let milestone_text = lib.element.create("textarea", {
       class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",
       'data-initial_value': milestone.description
     }, milestone.description);
     milestone_div.append(milestone_text);
+    milestone_div.append(milestoneProgressElement(progress, milestone));
 
     milestone_text.addEventListener("blur", async () => {
       if (milestone_text.value === milestone_text.dataset.initial_value) {
@@ -143,23 +284,41 @@
       });
     });
 
-    done_icon.addEventListener("click", async () => {
-      lib.confirm("Deseja concluir a meta?", async r => {
-        if (!r) { return; }
+    if (viewing_completed) {
+      action_icon.addEventListener("click", async () => {
+        lib.confirm("Deseja reabrir a meta?", async r => {
+          if (!r) { return; }
 
-        let updated_milestone = {
-          id: milestone.id,
-          status: "Concluído"
-        };
+          let response = await API.response(Milestone.update, {
+            id: milestone.id,
+            status: "Pendente"
+          });
 
-        let response = await API.response(Milestone.update, updated_milestone);
-        if (!response.done) { return; }
+          if (!response.done) { return; }
 
-        lib.message(response.done, () => {
-          milestone_div.remove();
+          lib.message(response.done, () => {
+            milestone_div.remove();
+          });
         });
       });
-    });
+    } else {
+      action_icon.addEventListener("click", async () => {
+        lib.confirm("Deseja concluir a meta?", async r => {
+          if (!r) { return; }
+
+          let response = await API.response(Milestone.update, {
+            id: milestone.id,
+            status: "Concluído"
+          });
+
+          if (!response.done) { return; }
+
+          lib.message(response.done, () => {
+            milestone_div.remove();
+          });
+        });
+      });
+    }
 
     goal_select.addEventListener("change", async () => {
       if (goal_select.value === milestone.goal_id) {
@@ -179,8 +338,9 @@
         if (r) { return; }
 
         let response = await API.response(Milestone.delete, milestone.id);
-        lib.message(response, () => {
+        lib.message(response, async () => {
           milestone_div.remove();
+          await updateMilestoneOrder(milestone_box);
         });
       }, "Não excluir", "Excluir meta");
     });

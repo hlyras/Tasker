@@ -2,6 +2,7 @@
 
 <script>
   let goal_box = null;
+  let goal_status_select = null;
 
   async function goalPopup() {
     const popup = lib.element.create("div", {
@@ -32,11 +33,28 @@
       lib.popup(await goalCreateForm(), false, true);
     });
 
+    goal_status_select = lib.element.create("select", {
+      class: "box b1 lucida-grande bold rem09 padding-10 margin-bottom-10"
+    });
+    popup.append(goal_status_select);
+
+    goal_status_select.append(lib.element.create("option", {
+      value: "Pendente"
+    }, "Pendente"));
+
+    goal_status_select.append(lib.element.create("option", {
+      value: "Concluído"
+    }, "Concluído"));
+
     goal_box = lib.element.create("div", {
       id: "goal_box",
       class: "box b1 container goal-popup-list scroll-y-auto h-center"
     });
     popup.append(goal_box);
+
+    goal_status_select.addEventListener("change", async () => {
+      await updateGoalBox();
+    });
 
     await updateGoalBox();
 
@@ -50,6 +68,16 @@
 
     let goals = await goalFilter({});
 
+    if (goal_status_select.value === "Concluído") {
+      goals = goals.filter(goal => goal.status === "Concluído");
+    } else {
+      goals = goals.filter(goal => goal.status !== "Concluído");
+    }
+
+    goals.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+
+    const progress_map = await buildMilestoneProgressByGoalMap();
+
     if (!goals.length) {
       goal_box.append(lib.element.create("div", {
         class: "box b1 lucida-grande bold padding-20 center"
@@ -58,42 +86,149 @@
     }
 
     goals.forEach(goal => {
-      let goal_div = goalDiv(goal);
+      let goal_div = goalDiv(
+        goal,
+        progress_map[goal.id],
+        goal_status_select.value === "Concluído"
+      );
       goal_box.append(goal_div);
     });
   }
 
-  function goalDiv(goal) {
-    let goal_div = lib.element.create("div", {
-      class: "box b2 container ground border shadow-st padding-3 margin-top-10"
+  async function buildMilestoneProgressByGoalMap() {
+    const milestones = await API.response(Milestone.filter, {}) || [];
+    const map = {};
+
+    milestones.forEach(milestone => {
+      const goal_id = milestone.goal_id;
+      if (!goal_id) { return; }
+
+      if (!map[goal_id]) {
+        map[goal_id] = { total: 0, completed: 0 };
+      }
+
+      map[goal_id].total++;
+      if (milestone.status === "Concluído") {
+        map[goal_id].completed++;
+      }
     });
+
+    return map;
+  }
+
+  function goalProgressElement(progress, goal) {
+    const wrapper = lib.element.create("div", {
+      class: "box b1 container margin-top-5",
+      style: "padding: 0 3px 3px;"
+    });
+
+    let label = "Nenhuma meta cadastrada";
+    if (progress && progress.total > 0) {
+      const unit = progress.total === 1 ? "meta" : "metas";
+      label = `${progress.completed} de ${progress.total} ${unit} concluída${progress.total === 1 ? "" : "s"}`;
+    }
+
+    const label_el = lib.element.create("div", {
+      class: "box b1 lucida-grande rem07 opacity-out-08 wrap" + (progress && progress.total > 0 ? " pointer" : ""),
+      style: progress && progress.total > 0 ? "text-decoration: underline;" : ""
+    }, label);
+    wrapper.append(label_el);
+
+    if (progress && progress.total > 0) {
+      label_el.addEventListener("click", async () => {
+        lib.popup(await goalProgressDetailPopup(goal), false, true);
+      });
+
+      const percent = Math.round((progress.completed / progress.total) * 100);
+      const bar = lib.element.create("div", {
+        class: "box b1 container",
+        style: "height: 4px; margin-top: 4px; background: var(--light); border-radius: 2px; overflow: hidden;"
+      });
+      bar.append(lib.element.create("div", {
+        style: `height: 100%; width: ${percent}%; background: var(--strong); border-radius: 2px;`
+      }));
+      wrapper.append(bar);
+    }
+
+    return wrapper;
+  }
+
+  async function goalProgressDetailPopup(goal) {
+    return progressDetailPopup({
+      title: goal.description,
+      icon: "/images/icon/goal.webp",
+      empty_pending: "Nenhuma meta pendente",
+      empty_completed: "Nenhuma meta concluída",
+      getItems: async (tab) => {
+        const milestones = (await API.response(Milestone.filter, {}) || [])
+          .filter(milestone => milestone.goal_id == goal.id)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+
+        if (tab === "pending") {
+          return milestones
+            .filter(milestone => milestone.status !== "Concluído")
+            .map(milestone => ({ description: milestone.description }));
+        }
+
+        return milestones
+          .filter(milestone => milestone.status === "Concluído")
+          .map(milestone => ({ description: milestone.description }));
+      }
+    });
+  }
+
+  async function updateGoalOrder(container) {
+    let goal_divs = container.children;
+
+    for (let i in goal_divs) {
+      if (!goal_divs[i].id) { continue; }
+
+      let goal_id = goal_divs[i].id.replace("goal-", "");
+
+      await API.response(Goal.update, {
+        id: goal_id,
+        sort_order: parseInt(i) + 1
+      }, "none");
+    }
+  }
+
+  function goalDiv(goal, progress, viewing_completed) {
+    let goal_div = lib.element.create("div", {
+      class: "box b2 container ground border shadow-st padding-3 margin-top-10 sortable-item"
+    });
+
+    goal_div.id = `goal-${goal.id}`;
 
     let option_div = lib.element.create("div", {
       class: "container b1 right padding-5"
     });
     goal_div.append(option_div);
 
-    option_div.append(lib.element.create("div", {
-      class: "mobile-box b7-10",
-    }));
-
-    option_div.append(lib.element.create("div", {
-      class: "mobile-box b10",
-    }));
-
-    let delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
+    let delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
       "20", "/images/icon/trash.png");
     option_div.append(delete_icon);
 
-    let done_icon = lib.element.icon("b10 opacity-out-08 pointer",
-      "20", "/images/icon/done.png");
-    option_div.append(done_icon);
+    let action_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
+      "20", viewing_completed ? "/images/icon/return.png" : "/images/icon/done.png");
+    option_div.append(action_icon);
+
+    let move_icon = lib.element.svg("mobile-box b10 opacity-out-08 v-center grab", "18",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+    option_div.append(move_icon);
+
+    lib.drag.element(goal_div, async () => {
+      await updateGoalOrder(goal_box);
+    }, move_icon, "v");
+
+    lib.drag.drop(goal_div, null, "drag-over", "v");
 
     let goal_text = lib.element.create("textarea", {
       class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",
       'data-initial_value': goal.description
     }, goal.description);
     goal_div.append(goal_text);
+    goal_div.append(goalProgressElement(progress, goal));
 
     goal_text.addEventListener("blur", async () => {
       if (goal_text.value === goal_text.dataset.initial_value) {
@@ -121,30 +256,50 @@
       });
     });
 
-    done_icon.addEventListener("click", async () => {
-      lib.confirm("Deseja concluir o objetivo?", async r => {
-        if (!r) { return; }
+    if (viewing_completed) {
+      action_icon.addEventListener("click", async () => {
+        lib.confirm("Deseja reabrir o objetivo?", async r => {
+          if (!r) { return; }
 
-        let response = await API.response(Goal.update, {
-          id: goal.id,
-          status: "Concluído"
-        });
+          let response = await API.response(Goal.update, {
+            id: goal.id,
+            status: "Pendente"
+          });
 
-        if (!response.done) { return; }
+          if (!response.done) { return; }
 
-        lib.message(response.done, () => {
-          goal_div.remove();
+          lib.message(response.done, () => {
+            goal_div.remove();
+          });
         });
       });
-    });
+    } else {
+      action_icon.addEventListener("click", async () => {
+        lib.confirm("Deseja concluir o objetivo?", async r => {
+          if (!r) { return; }
+
+          let response = await API.response(Goal.update, {
+            id: goal.id,
+            status: "Concluído"
+          });
+
+          if (!response.done) { return; }
+
+          lib.message(response.done, () => {
+            goal_div.remove();
+          });
+        });
+      });
+    }
 
     delete_icon.addEventListener("click", async () => {
       lib.confirm("Deseja excluir o objetivo?", async r => {
         if (r) { return; }
 
         let response = await API.response(Goal.delete, goal.id);
-        lib.message(response, () => {
+        lib.message(response, async () => {
           goal_div.remove();
+          await updateGoalOrder(goal_box);
         });
       }, "Não excluir", "Excluir objetivo");
     });

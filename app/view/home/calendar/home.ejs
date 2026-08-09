@@ -1,14 +1,49 @@
-<div class="box b1 container margin-top-5">
-  <div id="calendar-day-tabs" class="calendar-day-tabs mobile-box container margin-bottom-10"></div>
-  <div id="calendar-home-container" class="box b1 container calendar-home"></div>
+<div class="box b1 container margin-top-5 calendar-home-section">
+  <button type="button" id="calendar-home-toggle"
+    class="calendar-home-toggle mobile-box container pointer ground border padding-8"
+    aria-expanded="false" aria-controls="calendar-home-panel">
+    <span class="mobile-box a1 lucida-grande rem08 bold v-center">Calendário</span>
+    <span id="calendar-home-toggle-icon" class="calendar-home-toggle-icon">▶</span>
+  </button>
+
+  <div id="calendar-home-panel" class="display-none">
+    <div id="calendar-day-tabs" class="calendar-day-tabs mobile-box container margin-bottom-10 margin-top-10"></div>
+    <div id="calendar-home-container" class="box b1 container calendar-home"></div>
+  </div>
 </div>
 
 <script>
   var calendarHomeDayIndex = 0;
+  const CALENDAR_HOME_VISIBLE_KEY = "tasker-calendar-home-visible";
+
+  function calendarSetHomeVisible(visible) {
+    const panel = document.getElementById("calendar-home-panel");
+    const toggle = document.getElementById("calendar-home-toggle");
+    const icon = document.getElementById("calendar-home-toggle-icon");
+    const section = document.querySelector(".calendar-home-section");
+    if (!panel) { return; }
+
+    panel.classList.toggle("display-none", !visible);
+    section?.classList.toggle("is-open", visible);
+    toggle?.setAttribute("aria-expanded", visible ? "true" : "false");
+    if (icon) {
+      icon.textContent = visible ? "▼" : "▶";
+    }
+    localStorage.setItem(CALENDAR_HOME_VISIBLE_KEY, visible ? "1" : "0");
+  }
 
   document.addEventListener("DOMContentLoaded", async () => {
+    const toggle = document.getElementById("calendar-home-toggle");
+    const visible = localStorage.getItem(CALENDAR_HOME_VISIBLE_KEY) === "1";
+
     calendarBuildHomeDayTabs();
     await calendarInitHome();
+    calendarSetHomeVisible(visible);
+
+    toggle?.addEventListener("click", () => {
+      const is_hidden = document.getElementById("calendar-home-panel")?.classList.contains("display-none");
+      calendarSetHomeVisible(is_hidden);
+    });
   });
 
   function calendarBuildHomeDayTabs() {
