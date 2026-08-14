@@ -7,7 +7,8 @@
   </button>
 
   <div id="calendar-home-panel" class="display-none">
-    <div id="calendar-day-tabs" class="calendar-day-tabs box b1 container margin-bottom-10 margin-top-10"></div>
+    <div id="calendar-week-nav" class="box b1 container margin-top-10"></div>
+    <div id="calendar-day-tabs" class="calendar-day-tabs box b1 container margin-bottom-10 margin-top-5"></div>
     <div id="calendar-home-container" class="box b1 container calendar-home"></div>
   </div>
 </div>
@@ -30,6 +31,16 @@
       icon.textContent = visible ? "▼" : "▶";
     }
     localStorage.setItem(CALENDAR_HOME_VISIBLE_KEY, visible ? "1" : "0");
+
+    if (visible) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (typeof calendarSyncAgendaScroll === "function") {
+            calendarSyncAgendaScroll();
+          }
+        });
+      });
+    }
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
@@ -48,6 +59,7 @@
     document.addEventListener("visibilitychange", async () => {
       if (document.hidden) { return; }
       if (!calendarWeekDidChange()) { return; }
+      calendarGoToCurrentWeek();
       await calendarRenderHomeDay(calendarTodayIndex());
     });
   });
@@ -55,6 +67,13 @@
   function calendarBuildHomeDayTabs() {
     const tabs_container = document.getElementById("calendar-day-tabs");
     if (!tabs_container) { return; }
+
+    calendarBuildWeekNav(document.getElementById("calendar-week-nav"), async () => {
+      const day_index = calendarIsViewingCurrentWeek()
+        ? calendarTodayIndex()
+        : calendarHomeDayIndex;
+      await calendarRenderHomeDay(day_index);
+    });
 
     tabs_container.innerHTML = "";
     const days = calendarGetDays();

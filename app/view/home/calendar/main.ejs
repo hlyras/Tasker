@@ -22,8 +22,31 @@
     return start;
   }
 
+  let calendarViewedWeekStart = null;
+
+  function calendarGetViewedWeekStart() {
+    if (!calendarViewedWeekStart) {
+      calendarViewedWeekStart = calendarGetWeekStart();
+    }
+    return new Date(calendarViewedWeekStart);
+  }
+
+  function calendarGoToCurrentWeek() {
+    calendarViewedWeekStart = calendarGetWeekStart();
+  }
+
+  function calendarShiftWeek(offset_weeks) {
+    const start = calendarGetViewedWeekStart();
+    start.setDate(start.getDate() + (offset_weeks * CALENDAR_WEEK_DAYS));
+    calendarViewedWeekStart = start;
+  }
+
+  function calendarIsViewingCurrentWeek() {
+    return calendarDateKey(calendarGetViewedWeekStart()) === calendarDateKey(calendarGetWeekStart());
+  }
+
   function calendarGetDays() {
-    const start = calendarGetWeekStart();
+    const start = calendarGetViewedWeekStart();
     const days = [];
 
     for (let i = 0; i < CALENDAR_WEEK_DAYS; i++) {
@@ -33,6 +56,23 @@
     }
 
     return days;
+  }
+
+  function calendarWeekLabel() {
+    const days = calendarGetDays();
+    const first = days[0];
+    const last = days[days.length - 1];
+    const format = date => {
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      return `${day}/${month}`;
+    };
+
+    if (calendarIsViewingCurrentWeek()) {
+      return "Esta semana";
+    }
+
+    return `${format(first)} — ${format(last)}`;
   }
 
   function calendarTodayIndex() {
@@ -93,11 +133,13 @@
   }
 
   function calendarCleanSchedule(schedule) {
-    const week_start_key = calendarDateKey(calendarGetWeekStart());
+    const keep_start = calendarGetWeekStart();
+    keep_start.setDate(keep_start.getDate() - (CALENDAR_WEEK_DAYS * 4));
+    const keep_from_key = calendarDateKey(keep_start);
     const cleaned = {};
 
     Object.keys(schedule).forEach(date_key => {
-      if (date_key < week_start_key) { return; }
+      if (date_key < keep_from_key) { return; }
 
       const day_slots = schedule[date_key] || {};
       const cleaned_day = {};
@@ -214,6 +256,251 @@
     }
 
     return calendarSetSlotItems(schedule, date_key, time, items);
+  }
+
+  const CALENDAR_REPEATS_KEY = "tasker-calendar-repeats";
+  const CALENDAR_SEEDED_WEEKS_KEY = "tasker-calendar-seeded-weeks";
+  const CALENDAR_WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+  function calendarLoadJson(key, fallback) {
+    try {
+      return JSON.parse(localStorage.getItem(key) || "") || fallback;
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  function calendarLoadRepeats() {
+    const repeats = calendarLoadJson(CALENDAR_REPEATS_KEY, {});
+    return repeats && typeof repeats === "object" ? repeats : {};
+  }
+
+  function calendarSaveRepeats(repeats) {
+    localStorage.setItem(CALENDAR_REPEATS_KEY, JSON.stringify(repeats));
+  }
+
+  function calendarLoadSeededWeeks() {
+    const seeded = calendarLoadJson(CALENDAR_SEEDED_WEEKS_KEY, []);
+    return Array.isArray(seeded) ? seeded : [];
+  }
+
+  function calendarSaveSeededWeeks(seeded) {
+    localStorage.setItem(CALENDAR_SEEDED_WEEKS_KEY, JSON.stringify(seeded));
+  }
+
+  function calendarRepeatKey(kind, id) {
+    return `${kind}:${calendarNormalizeId(id)}`;
+  }
+
+  function calendarRegisterRepeat(kind, id, time, weekdays, force) {
+    if (!weekdays || !weekdays.length) { return; }
+    if (!force && weekdays.length < 2) { return; }
+
+    const repeats = calendarLoadRepeats();
+    repeats[calendarRepeatKey(kind, id)] = {
+      time,
+      weekdays: [...weekdays].sort((a, b) => a - b)
+    };
+    calendarSaveRepeats(repeats);
+    calendarSaveSeededWeeks([calendarDateKey(calendarGetViewedWeekStart())]);
+  }
+
+  function calendarClearRepeat(kind, id) {
+    const repeats = calendarLoadRepeats();
+    delete repeats[calendarRepeatKey(kind, id)];
+    calendarSaveRepeats(repeats);
+  }
+
+  function calendarHasRepeat(kind, id) {
+    return Boolean(calendarLoadRepeats()[calendarRepeatKey(kind, id)]);
+  }
+
+  function calendarRemoveItemFromOtherSlots(schedule, kind, id, keep_date_key, keep_time) {
+    id = calendarNormalizeId(id);
+    const field = kind === "subtask" ? "subtasks" : kind === "session" ? "sessions" : "avulsas";
+    const next_schedule = { ...schedule };
+
+    Object.keys(next_schedule).forEach(date_key => {
+      const day_slots = { ...next_schedule[date_key] };
+
+      Object.keys(day_slots).forEach(time => {
+        if (date_key === keep_date_key && time === keep_time) { return; }
+
+        const items = calendarNormalizeSlot(day_slots[time]);
+        items[field] = items[field].filter(item_id => item_id !== id);
+
+        if (!items.subtasks.length && !items.sessions.length && !items.avulsas.length) {
+          delete day_slots[time];
+        } else {
+          day_slots[time] = items;
+        }
+      });
+
+      next_schedule[date_key] = day_slots;
+    });
+
+    return calendarSaveSchedule(next_schedule);
+  }
+
+  function calendarAppendRepeatCancel(actions, {
+    kind,
+    id,
+    date_key,
+    time,
+    getSchedule,
+    onScheduleChange,
+    onRefresh
+  }) {
+    if (!calendarHasRepeat(kind, id)) { return; }
+
+    const repeat_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
+      "14", "/images/icon/refresh.png");
+    repeat_icon.title = "Cancelar recorrência";
+    actions.append(repeat_icon);
+
+    repeat_icon.addEventListener("click", async event => {
+      event.stopPropagation();
+      calendarClearRepeat(kind, id);
+      const next_schedule = calendarRemoveItemFromOtherSlots(
+        getSchedule(),
+        kind,
+        id,
+        date_key,
+        time
+      );
+      onScheduleChange(next_schedule);
+      lib.message("Recorrência cancelada.");
+      await onRefresh();
+    });
+  }
+
+  function calendarAddToWeekdays(schedule, time, weekdays, add_one) {
+    let next = schedule;
+
+    calendarGetDays().forEach(day => {
+      if (!weekdays.includes(day.getDay())) { return; }
+      next = add_one(next, calendarDateKey(day), time);
+    });
+
+    return next;
+  }
+
+  function calendarApplyRepeatsToWeek(schedule, valid_subtask_ids, valid_session_ids, valid_avulsa_ids) {
+    const week_key = calendarDateKey(calendarGetViewedWeekStart());
+    const seeded = calendarLoadSeededWeeks();
+    if (seeded.includes(week_key)) {
+      return schedule;
+    }
+
+    const repeats = calendarLoadRepeats();
+    const stale = [];
+    let next = schedule;
+
+    calendarGetDays().forEach(day => {
+      const weekday = day.getDay();
+      const date_key = calendarDateKey(day);
+
+      Object.keys(repeats).forEach(key => {
+        const rule = repeats[key];
+        if (!rule || !Array.isArray(rule.weekdays) || !rule.weekdays.includes(weekday)) {
+          return;
+        }
+
+        const [kind, raw_id] = key.split(":");
+        const id = calendarNormalizeId(raw_id);
+
+        if (kind === "subtask") {
+          if (!valid_subtask_ids.has(id)) { stale.push(key); return; }
+          next = calendarAddSubtaskToSlot(next, date_key, rule.time, id);
+          return;
+        }
+
+        if (kind === "session") {
+          if (!valid_session_ids.has(id)) { stale.push(key); return; }
+          next = calendarAddSessionToSlot(next, date_key, rule.time, id);
+          return;
+        }
+
+        if (kind === "avulsa") {
+          if (!valid_avulsa_ids.has(id)) { stale.push(key); return; }
+          next = calendarAddAvulsaToSlot(next, date_key, rule.time, id);
+        }
+      });
+    });
+
+    if (stale.length) {
+      stale.forEach(key => {
+        delete repeats[key];
+      });
+      calendarSaveRepeats(repeats);
+    }
+
+    seeded.push(week_key);
+    calendarSaveSeededWeeks(seeded);
+    return next;
+  }
+
+  function calendarBuildWeekdayPicker(date_key) {
+    const selected = new Set([calendarParseDateKey(date_key).getDay()]);
+    const paints = [];
+
+    const box = lib.element.create("div", {
+      class: "box b1 container margin-bottom-10"
+    });
+
+    box.append(lib.element.create("div", {
+      class: "box b1 lucida-grande rem08 bold padding-3"
+    }, "Repetir nos dias"));
+
+    box.append(lib.element.create("div", {
+      class: "box b1 lucida-grande rem07 opacity-out-08 padding-3 margin-bottom-5"
+    }, "Marque os dias que devem receber este horário"));
+
+    const row = lib.element.create("div", {
+      class: "box b1 container"
+    });
+    box.append(row);
+
+    CALENDAR_WEEKDAY_LABELS.forEach((label, weekday) => {
+      const button = lib.element.create("button", {
+        type: "button",
+        class: "mobile-box a7 lucida-grande rem07 bold border pointer padding-5 nowrap"
+      }, label);
+
+      const paint = () => {
+        const active = selected.has(weekday);
+        button.style.background = active ? "#245ae5" : "var(--ground)";
+        button.style.color = active ? "#fff" : "inherit";
+        button.style.borderColor = active ? "#245ae5" : "";
+      };
+
+      paint();
+      paints.push(paint);
+
+      button.addEventListener("click", () => {
+        if (selected.has(weekday)) {
+          if (selected.size === 1) { return; }
+          selected.delete(weekday);
+        } else {
+          selected.add(weekday);
+        }
+        paints.forEach(fn => fn());
+      });
+
+      row.append(button);
+    });
+
+    return {
+      box,
+      getWeekdays: () => CALENDAR_WEEKDAY_LABELS
+        .map((_, weekday) => weekday)
+        .filter(weekday => selected.has(weekday))
+    };
+  }
+
+  function calendarParseDateKey(date_key) {
+    const [year, month, day] = date_key.split("-").map(Number);
+    return new Date(year, month - 1, day);
   }
 
   function calendarRemoveSubtaskFromSlot(schedule, date_key, time, subtask_id) {
@@ -418,12 +705,115 @@
 
   let calendarHomeRefresh = null;
   let calendarActiveWeekStart = null;
+  let calendarAgendaScrollTop = null;
+  let calendarAgendaDidCenterScroll = false;
 
   function calendarWeekDidChange() {
     const week_start = calendarDateKey(calendarGetWeekStart());
     if (calendarActiveWeekStart === week_start) { return false; }
     calendarActiveWeekStart = week_start;
     return true;
+  }
+
+  function calendarCenterCurrentSlot(body, row) {
+    if (!body || !row) { return false; }
+
+    const view_height = body.clientHeight;
+    if (view_height < 40) { return false; }
+
+    const max_scroll = body.scrollHeight - view_height;
+    if (max_scroll <= 0) { return false; }
+
+    const body_rect = body.getBoundingClientRect();
+    const row_rect = row.getBoundingClientRect();
+    const row_offset = row_rect.top - body_rect.top + body.scrollTop;
+    const target = row_offset - ((view_height - row_rect.height) / 2);
+
+    body.scrollTop = Math.max(0, Math.min(target, max_scroll));
+    calendarAgendaScrollTop = body.scrollTop;
+    calendarAgendaDidCenterScroll = true;
+    return true;
+  }
+
+  function calendarApplyAgendaScroll(body, current_slot_row) {
+    if (!body) { return; }
+
+    if (!calendarAgendaDidCenterScroll) {
+      calendarCenterCurrentSlot(body, current_slot_row);
+      return;
+    }
+
+    if (calendarAgendaScrollTop != null) {
+      body.scrollTop = calendarAgendaScrollTop;
+    }
+  }
+
+  function calendarBindAgendaScroll(body) {
+    body.addEventListener("scroll", () => {
+      calendarAgendaScrollTop = body.scrollTop;
+    }, { passive: true });
+  }
+
+  function calendarSyncAgendaScroll(attempt) {
+    const body = document.querySelector("#calendar-home-container .calendar-body")
+      || document.querySelector(".calendar-body");
+    if (!body) { return; }
+
+    calendarApplyAgendaScroll(body, body.querySelector(".calendar-row-current"));
+
+    if (!calendarAgendaDidCenterScroll && (attempt || 0) < 12) {
+      requestAnimationFrame(() => calendarSyncAgendaScroll((attempt || 0) + 1));
+    }
+  }
+
+  function calendarBuildWeekNav(container, onWeekChange) {
+    if (!container) { return; }
+
+    container.innerHTML = "";
+
+    const prev = lib.element.create("button", {
+      type: "button",
+      class: "mobile-box b10 pointer ground noborder padding-5",
+      title: "Semana anterior"
+    });
+    prev.append(lib.element.create("img", {
+      class: "image-prop size-18 center",
+      src: "/images/icon/left-arrow.png"
+    }));
+    container.append(prev);
+
+    const label = lib.element.create("div", {
+      class: "mobile-box flex-1 lucida-grande rem08 bold center padding-5 v-center pointer",
+      title: calendarIsViewingCurrentWeek() ? "" : "Voltar para esta semana"
+    }, calendarWeekLabel());
+    container.append(label);
+
+    const next = lib.element.create("button", {
+      type: "button",
+      class: "mobile-box b10 pointer ground noborder padding-5",
+      title: "Próxima semana"
+    });
+    next.append(lib.element.create("img", {
+      class: "image-prop size-18 center",
+      src: "/images/icon/right-arrow.png"
+    }));
+    container.append(next);
+
+    prev.addEventListener("click", async () => {
+      calendarShiftWeek(-1);
+      await onWeekChange();
+    });
+
+    next.addEventListener("click", async () => {
+      calendarShiftWeek(1);
+      await onWeekChange();
+    });
+
+    label.addEventListener("click", async () => {
+      if (calendarIsViewingCurrentWeek()) { return; }
+      calendarGoToCurrentWeek();
+      await onWeekChange();
+    });
   }
 
   async function calendarBuildScheduleView(container, { days, grid_class = "" }) {
@@ -475,6 +865,7 @@
       class: "box b1 container calendar-body scroll-y-auto"
     });
     grid.append(body);
+    calendarBindAgendaScroll(body);
 
     const time_slots = calendarGetTimeSlots();
     let current_slot_row = null;
@@ -488,8 +879,6 @@
     if (now_minutes >= start_minutes && now_minutes <= end_minutes) {
       current_slot_index = Math.floor((now_minutes - start_minutes) / 30);
     }
-
-    let is_initial_render = true;
 
     const render = async () => {
       const previous_scroll_top = body.scrollTop;
@@ -515,8 +904,15 @@
         new Set(pending_sessions.map(session => calendarNormalizeId(session.id))),
         new Set(pending_avulsas.map(avulsa => calendarNormalizeId(avulsa.id)))
       );
+      schedule = calendarApplyRepeatsToWeek(
+        schedule,
+        new Set(pending_subtasks.map(subtask => calendarNormalizeId(subtask.id))),
+        new Set(pending_sessions.map(session => calendarNormalizeId(session.id))),
+        new Set(pending_avulsas.map(avulsa => calendarNormalizeId(avulsa.id)))
+      );
 
       body.innerHTML = "";
+      current_slot_row = null;
 
       time_slots.forEach((time, slot_index) => {
         const row = lib.element.create("div", {
@@ -555,12 +951,14 @@
         body.append(row);
       });
 
-      if (is_initial_render && current_slot_row) {
-        body.scrollTop = Math.max(current_slot_row.offsetTop - 80, 0);
-        is_initial_render = false;
-      } else {
-        body.scrollTop = previous_scroll_top;
-      }
+      requestAnimationFrame(() => {
+        if (calendarAgendaDidCenterScroll) {
+          body.scrollTop = calendarAgendaScrollTop != null ? calendarAgendaScrollTop : previous_scroll_top;
+          return;
+        }
+
+        calendarApplyAgendaScroll(body, current_slot_row);
+      });
     };
 
     const refreshViews = async () => {
@@ -580,6 +978,7 @@
     if (!container) { return; }
 
     if (calendarWeekDidChange()) {
+      calendarGoToCurrentWeek();
       day_index = calendarTodayIndex();
     }
 
@@ -605,6 +1004,7 @@
   }
 
   async function calendarInitHome() {
+    calendarGoToCurrentWeek();
     await calendarRenderHomeDay(calendarTodayIndex());
   }
 
@@ -627,9 +1027,25 @@
       src: "/images/icon/calendar.png"
     }));
 
-    await calendarBuildScheduleView(popup, {
-      days: calendarGetDays()
+    const week_nav = lib.element.create("div", {
+      class: "box b1 container margin-bottom-5"
     });
+    popup.append(week_nav);
+
+    const grid_host = lib.element.create("div", {
+      class: "box b1 container"
+    });
+    popup.append(grid_host);
+
+    const renderWeek = async () => {
+      calendarBuildWeekNav(week_nav, renderWeek);
+      grid_host.innerHTML = "";
+      await calendarBuildScheduleView(grid_host, {
+        days: calendarGetDays()
+      });
+    };
+
+    await renderWeek();
 
     return popup;
   }
@@ -745,6 +1161,16 @@
       "14", "/images/icon/done.png");
     actions.append(done_icon);
 
+    calendarAppendRepeatCancel(actions, {
+      kind: "subtask",
+      id: subtask.id,
+      date_key,
+      time,
+      getSchedule,
+      onScheduleChange,
+      onRefresh
+    });
+
     const remove_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
@@ -759,6 +1185,7 @@
 
       if (!response) { return; }
 
+      calendarClearRepeat("subtask", subtask.id);
       const next_schedule = calendarRemoveSubtaskFromAllSlots(getSchedule(), subtask.id);
       onScheduleChange(next_schedule);
       await onRefresh();
@@ -883,6 +1310,16 @@
       "14", "/images/icon/done.png");
     actions.append(done_icon);
 
+    calendarAppendRepeatCancel(actions, {
+      kind: "session",
+      id: session.id,
+      date_key,
+      time,
+      getSchedule,
+      onScheduleChange,
+      onRefresh
+    });
+
     const remove_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
@@ -897,6 +1334,7 @@
 
       if (!response) { return; }
 
+      calendarClearRepeat("session", session.id);
       const next_schedule = calendarRemoveSessionFromAllSlots(getSchedule(), session.id);
       onScheduleChange(next_schedule);
       await onRefresh();
@@ -938,6 +1376,16 @@
       "14", "/images/icon/done.png");
     actions.append(done_icon);
 
+    calendarAppendRepeatCancel(actions, {
+      kind: "avulsa",
+      id: avulsa.id,
+      date_key,
+      time,
+      getSchedule,
+      onScheduleChange,
+      onRefresh
+    });
+
     const remove_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
@@ -959,6 +1407,7 @@
 
       if (!response) { return; }
 
+      calendarClearRepeat("avulsa", avulsa.id);
       const next_schedule = calendarRemoveAvulsaFromAllSlots(getSchedule(), avulsa.id);
       onScheduleChange(next_schedule);
       await onRefresh();
@@ -1046,6 +1495,9 @@
     slot_box.append(lib.element.create("div", {
       class: "mobile-box lucida-grande rem08 opacity-out-08 padding-5 v-center"
     }, calendarFormatSlotLabel(date_key, time)));
+
+    const weekday_picker = calendarBuildWeekdayPicker(date_key);
+    popup_content.append(weekday_picker.box);
 
     const tabs_box = lib.element.create("div", {
       class: "box b1 container border radius-5 margin-bottom-10",
@@ -1169,9 +1621,16 @@
               event.stopPropagation();
 
               const subtask_id = calendarNormalizeId(subtask.id);
-              const next_schedule = calendarAddSubtaskToSlot(current_schedule, date_key, time, subtask_id);
+              const weekdays = weekday_picker.getWeekdays();
+              const next_schedule = calendarAddToWeekdays(
+                current_schedule,
+                time,
+                weekdays,
+                (schedule, slot_date, slot_time) => calendarAddSubtaskToSlot(schedule, slot_date, slot_time, subtask_id)
+              );
               current_schedule = next_schedule;
               onScheduleChange(next_schedule);
+              calendarRegisterRepeat("subtask", subtask_id, time, weekdays);
               slot_subtask_ids.add(subtask_id);
 
               calendarPickerMarkAdded(subtask_button, subtask.description);
@@ -1193,7 +1652,19 @@
           event.stopPropagation();
 
           const subtask_ids = available_subtasks.map(subtask => calendarNormalizeId(subtask.id));
-          const next_schedule = calendarAddSubtasksToSlot(current_schedule, date_key, time, subtask_ids);
+          const weekdays = weekday_picker.getWeekdays();
+          let next_schedule = current_schedule;
+
+          subtask_ids.forEach(subtask_id => {
+            next_schedule = calendarAddToWeekdays(
+              next_schedule,
+              time,
+              weekdays,
+              (schedule, slot_date, slot_time) => calendarAddSubtaskToSlot(schedule, slot_date, slot_time, subtask_id)
+            );
+            calendarRegisterRepeat("subtask", subtask_id, time, weekdays);
+          });
+
           current_schedule = next_schedule;
           onScheduleChange(next_schedule);
 
@@ -1222,9 +1693,16 @@
       available_sessions.forEach(session => {
         workout_list.append(calendarSessionPickerCard(session, async card => {
           const session_id = calendarNormalizeId(session.id);
-          const next_schedule = calendarAddSessionToSlot(current_schedule, date_key, time, session_id);
+          const weekdays = weekday_picker.getWeekdays();
+          const next_schedule = calendarAddToWeekdays(
+            current_schedule,
+            time,
+            weekdays,
+            (schedule, slot_date, slot_time) => calendarAddSessionToSlot(schedule, slot_date, slot_time, session_id)
+          );
           current_schedule = next_schedule;
           onScheduleChange(next_schedule);
+          calendarRegisterRepeat("session", session_id, time, weekdays);
           slot_session_ids.add(session_id);
 
           card.style.pointerEvents = "none";
@@ -1291,17 +1769,28 @@
         return lib.message("Informe a descrição da tarefa avulsa.");
       }
 
+      const weekdays = weekday_picker.getWeekdays();
+      const recurrence_type = weekdays.length > 1 || avulsa_recurrence_select.value === "Recorrente"
+        ? "Recorrente"
+        : "Unica";
+
       const response = await API.response(Avulsa.create, {
         description,
-        recurrence_type: avulsa_recurrence_select.value
+        recurrence_type
       });
       if (!response) { return; }
 
       const avulsa = response.avulsa_task;
       const avulsa_id = calendarNormalizeId(avulsa.id);
-      const next_schedule = calendarAddAvulsaToSlot(current_schedule, date_key, time, avulsa_id);
+      const next_schedule = calendarAddToWeekdays(
+        current_schedule,
+        time,
+        weekdays,
+        (schedule, slot_date, slot_time) => calendarAddAvulsaToSlot(schedule, slot_date, slot_time, avulsa_id)
+      );
       current_schedule = next_schedule;
       onScheduleChange(next_schedule);
+      calendarRegisterRepeat("avulsa", avulsa_id, time, weekdays, recurrence_type === "Recorrente");
       slot_avulsa_ids.add(avulsa_id);
 
       avulsa_description_input.value = "";
@@ -1338,9 +1827,25 @@
             event.stopPropagation();
 
             const avulsa_id = calendarNormalizeId(avulsa.id);
-            const next_schedule = calendarAddAvulsaToSlot(current_schedule, date_key, time, avulsa_id);
+            const weekdays = weekday_picker.getWeekdays();
+
+            if (weekdays.length > 1 && !calendarIsRecurringAvulsa(avulsa)) {
+              await API.response(Avulsa.update, {
+                id: avulsa_id,
+                recurrence_type: "Recorrente"
+              });
+              avulsa.recurrence_type = "Recorrente";
+            }
+
+            const next_schedule = calendarAddToWeekdays(
+              current_schedule,
+              time,
+              weekdays,
+              (schedule, slot_date, slot_time) => calendarAddAvulsaToSlot(schedule, slot_date, slot_time, avulsa_id)
+            );
             current_schedule = next_schedule;
             onScheduleChange(next_schedule);
+            calendarRegisterRepeat("avulsa", avulsa_id, time, weekdays, calendarIsRecurringAvulsa(avulsa));
             slot_avulsa_ids.add(avulsa_id);
 
             calendarPickerMarkAdded(avulsa_button, avulsa.description);
