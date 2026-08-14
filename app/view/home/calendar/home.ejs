@@ -60,9 +60,6 @@
 
     document.addEventListener("visibilitychange", async () => {
       if (document.hidden) { return; }
-      if (typeof calendarSettleLateXp === "function") {
-        await calendarSettleLateXp();
-      }
       if (!calendarWeekDidChange()) { return; }
       calendarGoToCurrentWeek();
       await calendarRenderHomeDay(calendarTodayIndex());

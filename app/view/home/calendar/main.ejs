@@ -168,7 +168,10 @@
         avulsas: [],
         completed_subtasks: [],
         completed_sessions: [],
-        completed_avulsas: []
+        completed_avulsas: [],
+        missed_subtasks: [],
+        missed_sessions: [],
+        missed_avulsas: []
       };
     }
 
@@ -179,7 +182,10 @@
         avulsas: [],
         completed_subtasks: [],
         completed_sessions: [],
-        completed_avulsas: []
+        completed_avulsas: [],
+        missed_subtasks: [],
+        missed_sessions: [],
+        missed_avulsas: []
       };
     }
 
@@ -187,19 +193,32 @@
     const sessions = (slot.sessions || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id));
     const avulsas = (slot.avulsas || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id));
 
+    const completed_subtasks = (slot.completed_subtasks || [])
+      .map(calendarNormalizeId)
+      .filter(id => subtasks.includes(id));
+    const completed_sessions = (slot.completed_sessions || [])
+      .map(calendarNormalizeId)
+      .filter(id => sessions.includes(id));
+    const completed_avulsas = (slot.completed_avulsas || [])
+      .map(calendarNormalizeId)
+      .filter(id => avulsas.includes(id));
+
     return {
       subtasks,
       sessions,
       avulsas,
-      completed_subtasks: (slot.completed_subtasks || [])
+      completed_subtasks,
+      completed_sessions,
+      completed_avulsas,
+      missed_subtasks: (slot.missed_subtasks || [])
         .map(calendarNormalizeId)
-        .filter(id => subtasks.includes(id)),
-      completed_sessions: (slot.completed_sessions || [])
+        .filter(id => subtasks.includes(id) && !completed_subtasks.includes(id)),
+      missed_sessions: (slot.missed_sessions || [])
         .map(calendarNormalizeId)
-        .filter(id => sessions.includes(id)),
-      completed_avulsas: (slot.completed_avulsas || [])
+        .filter(id => sessions.includes(id) && !completed_sessions.includes(id)),
+      missed_avulsas: (slot.missed_avulsas || [])
         .map(calendarNormalizeId)
-        .filter(id => avulsas.includes(id))
+        .filter(id => avulsas.includes(id) && !completed_avulsas.includes(id))
     };
   }
 
@@ -271,47 +290,49 @@
     return "completed_avulsas";
   }
 
-  function calendarIsItemCompletedInSlot(schedule, date_key, time, kind, id) {
-    id = calendarNormalizeId(id);
-    return calendarGetSlotItems(schedule, date_key, time)[calendarCompletedField(kind)].includes(id);
+  function calendarMissedField(kind) {
+    if (kind === "subtask") { return "missed_subtasks"; }
+    if (kind === "session") { return "missed_sessions"; }
+    return "missed_avulsas";
   }
 
-  async function calendarToggleItemCompletedInSlot(schedule, date_key, time, kind, id) {
+  function calendarGetItemSlotStatus(schedule, date_key, time, kind, id) {
     id = calendarNormalizeId(id);
     const items = calendarGetSlotItems(schedule, date_key, time);
-    const field = calendarSlotField(kind);
-    const completed_field = calendarCompletedField(kind);
+    if (items[calendarCompletedField(kind)].includes(id)) { return "complete"; }
+    if (items[calendarMissedField(kind)].includes(id)) { return "missed"; }
+    return "none";
+  }
 
-    if (items[completed_field].includes(id)) {
-      items[completed_field] = items[completed_field].filter(item_id => item_id !== id);
-    } else if (items[field].includes(id)) {
+  function calendarIsItemCompletedInSlot(schedule, date_key, time, kind, id) {
+    return calendarGetItemSlotStatus(schedule, date_key, time, kind, id) === "complete";
+  }
+
+  async function calendarSetItemSlotMark(schedule, date_key, time, kind, id, mark) {
+    id = calendarNormalizeId(id);
+    const items = calendarGetSlotItems(schedule, date_key, time);
+    const completed_field = calendarCompletedField(kind);
+    const missed_field = calendarMissedField(kind);
+    const previous = calendarGetItemSlotStatus(schedule, date_key, time, kind, id);
+    const next_status = previous === mark ? "none" : mark;
+
+    items[completed_field] = items[completed_field].filter(item_id => item_id !== id);
+    items[missed_field] = items[missed_field].filter(item_id => item_id !== id);
+
+    if (next_status === "complete") {
       items[completed_field].push(id);
+    } else if (next_status === "missed") {
+      items[missed_field].push(id);
     }
 
     const next_schedule = calendarSetSlotItems(schedule, date_key, time, items);
-    await calendarSyncOccurrenceXp(
-      date_key,
-      time,
-      kind,
-      id,
-      next_schedule && calendarIsItemCompletedInSlot(next_schedule, date_key, time, kind, id)
-    );
+    await calendarSyncOccurrenceXp(date_key, time, kind, id, next_status);
     return next_schedule;
   }
 
   const CALENDAR_XP_COMPLETE = 20;
-  const CALENDAR_XP_LATE = -20;
+  const CALENDAR_XP_MISSED = -20;
   const CALENDAR_XP_EVENTS_KEY = "tasker-calendar-xp-events";
-  const CALENDAR_XP_STARTED_KEY = "tasker-calendar-xp-started";
-
-  function calendarXpStartedAt() {
-    let started = parseInt(localStorage.getItem(CALENDAR_XP_STARTED_KEY), 10);
-    if (!started) {
-      started = Date.now();
-      localStorage.setItem(CALENDAR_XP_STARTED_KEY, String(started));
-    }
-    return started;
-  }
 
   function calendarLoadXpEvents() {
     const events = calendarLoadJson(CALENDAR_XP_EVENTS_KEY, {});
@@ -324,16 +345,6 @@
 
   function calendarXpEventKey(date_key, time, kind, id) {
     return `${date_key}|${time}|${kind}|${calendarNormalizeId(id)}`;
-  }
-
-  function calendarSlotDateTime(date_key, time) {
-    const [year, month, day] = date_key.split("-").map(Number);
-    const [hour, minute] = time.split(":").map(Number);
-    return new Date(year, month - 1, day, hour, minute || 0, 0, 0);
-  }
-
-  function calendarSlotHasPassed(date_key, time) {
-    return Date.now() > calendarSlotDateTime(date_key, time).getTime();
   }
 
   async function calendarApplyXp(delta) {
@@ -357,83 +368,36 @@
     return true;
   }
 
+  function calendarXpForStatus(status) {
+    if (status === "complete") { return CALENDAR_XP_COMPLETE; }
+    if (status === "missed") { return CALENDAR_XP_MISSED; }
+    return 0;
+  }
+
   function calendarXpEventState(events, key) {
     const value = events[key];
-    if (!value) { return { complete: false, late: false }; }
-    if (value === "complete") { return { complete: true, late: false }; }
-    if (value === "late") { return { complete: false, late: true }; }
+    if (!value) { return { complete: false, missed: false }; }
+    if (value === "complete") { return { complete: true, missed: false }; }
+    if (value === "late") { return { complete: false, missed: true }; }
     return {
       complete: Boolean(value.complete),
-      late: Boolean(value.late)
+      missed: Boolean(value.missed || value.late)
     };
   }
 
-  async function calendarSyncOccurrenceXp(date_key, time, kind, id, completed) {
+  async function calendarSyncOccurrenceXp(date_key, time, kind, id, next_status) {
     const key = calendarXpEventKey(date_key, time, kind, id);
     const events = calendarLoadXpEvents();
     const state = calendarXpEventState(events, key);
-    let delta = 0;
+    const previous_status = state.complete ? "complete" : state.missed ? "missed" : "none";
+    const delta = calendarXpForStatus(next_status) - calendarXpForStatus(previous_status);
 
-    if (completed) {
-      if (state.complete) { return; }
-      delta += CALENDAR_XP_COMPLETE;
-      state.complete = true;
-    } else if (state.complete) {
-      delta -= CALENDAR_XP_COMPLETE;
-      state.complete = false;
-    } else {
-      return;
-    }
+    if (delta && !(await calendarApplyXp(delta))) { return; }
 
-    if (!(await calendarApplyXp(delta))) { return; }
-
-    events[key] = state;
-    calendarSaveXpEvents(events);
-  }
-
-  async function calendarSettleLateXp() {
-    const schedule = calendarLoadSchedule();
-    const events = calendarLoadXpEvents();
-    const started = calendarXpStartedAt();
-    const now = Date.now();
-    let delta = 0;
-
-    Object.keys(schedule).forEach(date_key => {
-      const day_slots = schedule[date_key] || {};
-      Object.keys(day_slots).forEach(time => {
-        const slot_time = calendarSlotDateTime(date_key, time).getTime();
-        const items = calendarNormalizeSlot(day_slots[time]);
-
-        ["subtask", "session", "avulsa"].forEach(kind => {
-          const field = calendarSlotField(kind);
-          const completed_field = calendarCompletedField(kind);
-
-          items[field].forEach(id => {
-            const key = calendarXpEventKey(date_key, time, kind, id);
-            const state = calendarXpEventState(events, key);
-            const completed = items[completed_field].includes(id);
-
-            if (completed && !state.complete) {
-              state.complete = true;
-              delta += CALENDAR_XP_COMPLETE;
-              events[key] = state;
-              return;
-            }
-
-            if (completed || slot_time > now || slot_time < started || state.late) {
-              return;
-            }
-
-            state.late = true;
-            delta += CALENDAR_XP_LATE;
-            events[key] = state;
-          });
-        });
-      });
-    });
-
-    if (!delta) { return; }
-    if (!(await calendarApplyXp(delta))) { return; }
+    events[key] = {
+      complete: next_status === "complete",
+      missed: next_status === "missed"
+    };
     calendarSaveXpEvents(events);
   }
 
@@ -555,7 +519,7 @@
     if (!calendarHasRepeat(kind, id)) { return; }
 
     const repeat_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/refresh.png");
+      "20", "/images/icon/refresh.png");
     repeat_icon.title = "Cancelar recorrência";
     actions.append(repeat_icon);
 
@@ -893,12 +857,69 @@
     return (items || []).filter(item => !calendarIsCompleted(item));
   }
 
-  function calendarPaintChipCompletion(text, done_icon, completed) {
+  function calendarPaintChipStatus(text, done_icon, miss_icon, status) {
+    const completed = status === "complete";
+    const missed = status === "missed";
+
     text.classList.toggle("line-through", completed);
-    text.classList.toggle("opacity-out-06", completed);
+    text.classList.toggle("opacity-out-06", completed || missed);
+    text.style.color = missed ? "#b91c1c" : "";
+
     if (done_icon) {
       done_icon.classList.toggle("opacity-out-04", completed);
     }
+    if (miss_icon) {
+      miss_icon.classList.toggle("opacity-out-04", missed);
+    }
+  }
+
+  function calendarBindChipStatus(actions, {
+    kind,
+    id,
+    date_key,
+    time,
+    getSchedule,
+    onScheduleChange,
+    textEl
+  }) {
+    const miss_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
+      "20", "/images/icon/decrease.png");
+    miss_icon.title = "Não concluído";
+    actions.append(miss_icon);
+
+    const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
+      "20", "/images/icon/done.png");
+    done_icon.title = "Concluído";
+    actions.append(done_icon);
+
+    const paint = schedule => {
+      calendarPaintChipStatus(
+        textEl,
+        done_icon,
+        miss_icon,
+        calendarGetItemSlotStatus(schedule, date_key, time, kind, id)
+      );
+    };
+
+    paint(getSchedule());
+
+    done_icon.addEventListener("click", async event => {
+      event.stopPropagation();
+      const next_schedule = await calendarSetItemSlotMark(
+        getSchedule(), date_key, time, kind, id, "complete"
+      );
+      onScheduleChange(next_schedule);
+      paint(next_schedule);
+    });
+
+    miss_icon.addEventListener("click", async event => {
+      event.stopPropagation();
+      const next_schedule = await calendarSetItemSlotMark(
+        getSchedule(), date_key, time, kind, id, "missed"
+      );
+      onScheduleChange(next_schedule);
+      paint(next_schedule);
+    });
   }
 
   async function calendarGetCalendarSubtasks() {
@@ -1159,7 +1180,6 @@
 
     const render = async () => {
       const previous_scroll_top = body.scrollTop;
-      await calendarSettleLateXp();
 
       calendar_subtasks = await calendarGetCalendarSubtasks();
       pending_sessions = await calendarGetPendingSessions();
@@ -1292,15 +1312,7 @@
 
   async function calendarInitHome() {
     calendarGoToCurrentWeek();
-    calendarXpStartedAt();
-    await calendarSettleLateXp();
     await calendarRenderHomeDay(calendarTodayIndex());
-
-    if (!window._calendarXpTimer) {
-      window._calendarXpTimer = setInterval(() => {
-        if (!document.hidden) { calendarSettleLateXp(); }
-      }, 60000);
-    }
   }
 
   async function calendarPopup() {
@@ -1430,6 +1442,23 @@
     return slot;
   }
 
+  function calendarChipActionRows() {
+    const actions = lib.element.create("div", {
+      class: "calendar-subtask-actions"
+    });
+    const status_row = lib.element.create("div", {
+      class: "container",
+      style: "flex-wrap: nowrap; gap: 4px;"
+    });
+    const manage_row = lib.element.create("div", {
+      class: "container",
+      style: "flex-wrap: nowrap; gap: 4px;"
+    });
+    actions.append(status_row);
+    actions.append(manage_row);
+    return { actions, status_row, manage_row };
+  }
+
   function calendarSubtaskChip({
     subtask,
     date_key,
@@ -1447,21 +1476,20 @@
     }, subtask.description);
     chip.append(text);
 
-    const actions = lib.element.create("div", {
-      class: "calendar-subtask-actions"
-    });
+    const { actions, status_row, manage_row } = calendarChipActionRows();
     chip.append(actions);
 
-    const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/done.png");
-    actions.append(done_icon);
-    calendarPaintChipCompletion(
-      text,
-      done_icon,
-      calendarIsItemCompletedInSlot(getSchedule(), date_key, time, "subtask", subtask.id)
-    );
+    calendarBindChipStatus(status_row, {
+      kind: "subtask",
+      id: subtask.id,
+      date_key,
+      time,
+      getSchedule,
+      onScheduleChange,
+      textEl: text
+    });
 
-    calendarAppendRepeatCancel(actions, {
+    calendarAppendRepeatCancel(manage_row, {
       kind: "subtask",
       id: subtask.id,
       date_key,
@@ -1472,25 +1500,8 @@
     });
 
     const remove_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/close-small.png");
-    actions.append(remove_icon);
-
-    done_icon.addEventListener("click", async event => {
-      event.stopPropagation();
-      const next_schedule = await calendarToggleItemCompletedInSlot(
-        getSchedule(),
-        date_key,
-        time,
-        "subtask",
-        subtask.id
-      );
-      onScheduleChange(next_schedule);
-      calendarPaintChipCompletion(
-        text,
-        done_icon,
-        calendarIsItemCompletedInSlot(next_schedule, date_key, time, "subtask", subtask.id)
-      );
-    });
+      "20", "/images/icon/close-small.png");
+    manage_row.append(remove_icon);
 
     remove_icon.addEventListener("click", event => {
       event.stopPropagation();
@@ -1630,22 +1641,20 @@
     const content = calendarSessionContentDiv(session);
     chip.append(content);
 
-    const actions = lib.element.create("div", {
-      class: "calendar-subtask-actions"
-    });
+    const { actions, status_row, manage_row } = calendarChipActionRows();
     chip.append(actions);
 
-    const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/done.png");
-    done_icon.title = "Concluir treino";
-    actions.append(done_icon);
+    calendarBindChipStatus(status_row, {
+      kind: "session",
+      id: session.id,
+      date_key,
+      time,
+      getSchedule,
+      onScheduleChange,
+      textEl: content
+    });
 
-    const edit_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/edit.png");
-    edit_icon.title = "Editar treino";
-    actions.append(edit_icon);
-
-    calendarAppendRepeatCancel(actions, {
+    calendarAppendRepeatCancel(manage_row, {
       kind: "session",
       id: session.id,
       date_key,
@@ -1656,37 +1665,8 @@
     });
 
     const remove_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/close-small.png");
-    actions.append(remove_icon);
-
-    calendarPaintChipCompletion(
-      content,
-      done_icon,
-      calendarIsItemCompletedInSlot(getSchedule(), date_key, time, "session", session.id)
-    );
-
-    edit_icon.addEventListener("click", async event => {
-      event.stopPropagation();
-      if (typeof workoutOpenEditPopup !== "function") { return; }
-      await workoutOpenEditPopup(session, onRefresh);
-    });
-
-    done_icon.addEventListener("click", async event => {
-      event.stopPropagation();
-      const next_schedule = await calendarToggleItemCompletedInSlot(
-        getSchedule(),
-        date_key,
-        time,
-        "session",
-        session.id
-      );
-      onScheduleChange(next_schedule);
-      calendarPaintChipCompletion(
-        content,
-        done_icon,
-        calendarIsItemCompletedInSlot(next_schedule, date_key, time, "session", session.id)
-      );
-    });
+      "20", "/images/icon/close-small.png");
+    manage_row.append(remove_icon);
 
     remove_icon.addEventListener("click", event => {
       event.stopPropagation();
@@ -1715,21 +1695,20 @@
     }, calendarAvulsaLabel(avulsa));
     chip.append(text);
 
-    const actions = lib.element.create("div", {
-      class: "calendar-subtask-actions"
-    });
+    const { actions, status_row, manage_row } = calendarChipActionRows();
     chip.append(actions);
 
-    const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/done.png");
-    actions.append(done_icon);
-    calendarPaintChipCompletion(
-      text,
-      done_icon,
-      calendarIsItemCompletedInSlot(getSchedule(), date_key, time, "avulsa", avulsa.id)
-    );
+    calendarBindChipStatus(status_row, {
+      kind: "avulsa",
+      id: avulsa.id,
+      date_key,
+      time,
+      getSchedule,
+      onScheduleChange,
+      textEl: text
+    });
 
-    calendarAppendRepeatCancel(actions, {
+    calendarAppendRepeatCancel(manage_row, {
       kind: "avulsa",
       id: avulsa.id,
       date_key,
@@ -1740,25 +1719,8 @@
     });
 
     const remove_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
-      "14", "/images/icon/close-small.png");
-    actions.append(remove_icon);
-
-    done_icon.addEventListener("click", async event => {
-      event.stopPropagation();
-      const next_schedule = await calendarToggleItemCompletedInSlot(
-        getSchedule(),
-        date_key,
-        time,
-        "avulsa",
-        avulsa.id
-      );
-      onScheduleChange(next_schedule);
-      calendarPaintChipCompletion(
-        text,
-        done_icon,
-        calendarIsItemCompletedInSlot(next_schedule, date_key, time, "avulsa", avulsa.id)
-      );
-    });
+      "20", "/images/icon/close-small.png");
+    manage_row.append(remove_icon);
 
     remove_icon.addEventListener("click", event => {
       event.stopPropagation();

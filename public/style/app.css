@@ -6292,7 +6292,7 @@ textarea,
 .calendar-subtask-actions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
