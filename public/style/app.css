@@ -6424,11 +6424,6 @@ textarea,
   line-height: 1.2;
 }
 
-.workout-popup {
-  min-width: 320px;
-  max-width: 640px;
-}
-
 .workout-sessions-box {
   max-height: 35vh;
   min-height: 100px;

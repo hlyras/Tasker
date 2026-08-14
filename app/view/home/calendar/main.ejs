@@ -162,21 +162,44 @@
 
   function calendarNormalizeSlot(slot) {
     if (!slot) {
-      return { subtasks: [], sessions: [], avulsas: [] };
+      return {
+        subtasks: [],
+        sessions: [],
+        avulsas: [],
+        completed_subtasks: [],
+        completed_sessions: [],
+        completed_avulsas: []
+      };
     }
 
     if (Array.isArray(slot)) {
       return {
         subtasks: slot.map(calendarNormalizeId).filter(id => !Number.isNaN(id)),
         sessions: [],
-        avulsas: []
+        avulsas: [],
+        completed_subtasks: [],
+        completed_sessions: [],
+        completed_avulsas: []
       };
     }
 
+    const subtasks = (slot.subtasks || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id));
+    const sessions = (slot.sessions || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id));
+    const avulsas = (slot.avulsas || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id));
+
     return {
-      subtasks: (slot.subtasks || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id)),
-      sessions: (slot.sessions || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id)),
-      avulsas: (slot.avulsas || []).map(calendarNormalizeId).filter(id => !Number.isNaN(id))
+      subtasks,
+      sessions,
+      avulsas,
+      completed_subtasks: (slot.completed_subtasks || [])
+        .map(calendarNormalizeId)
+        .filter(id => subtasks.includes(id)),
+      completed_sessions: (slot.completed_sessions || [])
+        .map(calendarNormalizeId)
+        .filter(id => sessions.includes(id)),
+      completed_avulsas: (slot.completed_avulsas || [])
+        .map(calendarNormalizeId)
+        .filter(id => avulsas.includes(id))
     };
   }
 
@@ -232,6 +255,38 @@
         items.subtasks.push(subtask_id);
       }
     });
+
+    return calendarSetSlotItems(schedule, date_key, time, items);
+  }
+
+  function calendarSlotField(kind) {
+    if (kind === "subtask") { return "subtasks"; }
+    if (kind === "session") { return "sessions"; }
+    return "avulsas";
+  }
+
+  function calendarCompletedField(kind) {
+    if (kind === "subtask") { return "completed_subtasks"; }
+    if (kind === "session") { return "completed_sessions"; }
+    return "completed_avulsas";
+  }
+
+  function calendarIsItemCompletedInSlot(schedule, date_key, time, kind, id) {
+    id = calendarNormalizeId(id);
+    return calendarGetSlotItems(schedule, date_key, time)[calendarCompletedField(kind)].includes(id);
+  }
+
+  function calendarToggleItemCompletedInSlot(schedule, date_key, time, kind, id) {
+    id = calendarNormalizeId(id);
+    const items = calendarGetSlotItems(schedule, date_key, time);
+    const field = calendarSlotField(kind);
+    const completed_field = calendarCompletedField(kind);
+
+    if (items[completed_field].includes(id)) {
+      items[completed_field] = items[completed_field].filter(item_id => item_id !== id);
+    } else if (items[field].includes(id)) {
+      items[completed_field].push(id);
+    }
 
     return calendarSetSlotItems(schedule, date_key, time, items);
   }
@@ -385,7 +440,7 @@
     return next;
   }
 
-  function calendarApplyRepeatsToWeek(schedule, valid_subtask_ids, valid_session_ids, valid_avulsa_ids) {
+  function calendarApplyRepeatsToWeek(schedule, existing_ids, pending_ids) {
     const week_key = calendarDateKey(calendarGetViewedWeekStart());
     const seeded = calendarLoadSeededWeeks();
     if (seeded.includes(week_key)) {
@@ -410,19 +465,21 @@
         const id = calendarNormalizeId(raw_id);
 
         if (kind === "subtask") {
-          if (!valid_subtask_ids.has(id)) { stale.push(key); return; }
+          if (!existing_ids.subtasks.has(id)) { stale.push(key); return; }
+          if (!pending_ids.subtasks.has(id)) { return; }
           next = calendarAddSubtaskToSlot(next, date_key, rule.time, id);
           return;
         }
 
         if (kind === "session") {
-          if (!valid_session_ids.has(id)) { stale.push(key); return; }
+          if (!existing_ids.sessions.has(id)) { stale.push(key); return; }
           next = calendarAddSessionToSlot(next, date_key, rule.time, id);
           return;
         }
 
         if (kind === "avulsa") {
-          if (!valid_avulsa_ids.has(id)) { stale.push(key); return; }
+          if (!existing_ids.avulsas.has(id)) { stale.push(key); return; }
+          if (!pending_ids.avulsas.has(id)) { return; }
           next = calendarAddAvulsaToSlot(next, date_key, rule.time, id);
         }
       });
@@ -441,25 +498,74 @@
   }
 
   function calendarBuildWeekdayPicker(date_key) {
-    const selected = new Set([calendarParseDateKey(date_key).getDay()]);
+    const current_weekday = calendarParseDateKey(date_key).getDay();
+    const selected = new Set([current_weekday]);
     const paints = [];
+    let enabled = false;
 
     const box = lib.element.create("div", {
       class: "box b1 container margin-bottom-10"
     });
 
-    box.append(lib.element.create("div", {
-      class: "box b1 lucida-grande rem08 bold padding-3"
+    const header = lib.element.create("div", {
+      class: "box b1 container",
+      style: "flex-wrap: nowrap;"
+    });
+    box.append(header);
+
+    header.append(lib.element.create("div", {
+      class: "mobile-box flex-1 lucida-grande rem08 bold padding-3 v-center"
     }, "Repetir nos dias"));
 
-    box.append(lib.element.create("div", {
+    const switch_row = lib.element.create("div", {
+      class: "mobile-box container border radius-5",
+      style: "overflow: hidden; flex-wrap: nowrap;"
+    });
+    header.append(switch_row);
+
+    const off_button = lib.element.create("button", {
+      type: "button",
+      class: "mobile-box lucida-grande rem07 bold pointer padding-5 noborder"
+    }, "Off");
+    switch_row.append(off_button);
+
+    const on_button = lib.element.create("button", {
+      type: "button",
+      class: "mobile-box lucida-grande rem07 bold pointer padding-5 noborder",
+      style: "border-left: 1px solid var(--light);"
+    }, "On");
+    switch_row.append(on_button);
+
+    const days_box = lib.element.create("div", {
+      class: "box b1 display-none"
+    });
+    box.append(days_box);
+
+    days_box.append(lib.element.create("div", {
       class: "box b1 lucida-grande rem07 opacity-out-08 padding-3 margin-bottom-5"
     }, "Marque os dias que devem receber este horário"));
 
     const row = lib.element.create("div", {
       class: "box b1 container"
     });
-    box.append(row);
+    days_box.append(row);
+
+    const paintSwitch = () => {
+      off_button.style.background = enabled ? "var(--ground)" : "#245ae5";
+      off_button.style.color = enabled ? "inherit" : "#fff";
+      on_button.style.background = enabled ? "#245ae5" : "var(--ground)";
+      on_button.style.color = enabled ? "#fff" : "inherit";
+      days_box.classList.toggle("display-none", !enabled);
+    };
+
+    const setEnabled = value => {
+      enabled = value;
+      paintSwitch();
+    };
+
+    off_button.addEventListener("click", () => setEnabled(false));
+    on_button.addEventListener("click", () => setEnabled(true));
+    paintSwitch();
 
     CALENDAR_WEEKDAY_LABELS.forEach((label, weekday) => {
       const button = lib.element.create("button", {
@@ -492,9 +598,14 @@
 
     return {
       box,
-      getWeekdays: () => CALENDAR_WEEKDAY_LABELS
-        .map((_, weekday) => weekday)
-        .filter(weekday => selected.has(weekday))
+      isEnabled: () => enabled,
+      getWeekdays: () => {
+        if (!enabled) { return [current_weekday]; }
+
+        return CALENDAR_WEEKDAY_LABELS
+          .map((_, weekday) => weekday)
+          .filter(weekday => selected.has(weekday));
+      }
     };
   }
 
@@ -624,10 +735,29 @@
     return calendarSaveSchedule(next_schedule);
   }
 
-  async function calendarGetPendingSubtasks() {
-    const subtasks = await API.response(Subtask.filter, { status: "Pendente" });
-    if (!subtasks) { return []; }
-    return subtasks;
+  function calendarItemIds(items) {
+    return new Set((items || []).map(item => calendarNormalizeId(item.id)));
+  }
+
+  function calendarIsCompleted(item) {
+    return item.status === "Concluído";
+  }
+
+  function calendarPendingItems(items) {
+    return (items || []).filter(item => !calendarIsCompleted(item));
+  }
+
+  function calendarPaintChipCompletion(text, done_icon, completed) {
+    text.classList.toggle("line-through", completed);
+    text.classList.toggle("opacity-out-06", completed);
+    if (done_icon) {
+      done_icon.classList.toggle("opacity-out-04", completed);
+    }
+  }
+
+  async function calendarGetCalendarSubtasks() {
+    const subtasks = await API.response(Subtask.filter, {});
+    return subtasks || [];
   }
 
   async function calendarGetPendingSessions() {
@@ -636,10 +766,9 @@
     return sessions;
   }
 
-  async function calendarGetPendingAvulsas() {
-    const avulsa_tasks = await API.response(Avulsa.filter, { status: "Pendente" });
-    if (!avulsa_tasks) { return []; }
-    return avulsa_tasks;
+  async function calendarGetCalendarAvulsas() {
+    const avulsa_tasks = await API.response(Avulsa.filter, {});
+    return avulsa_tasks || [];
   }
 
   function calendarIsRecurringAvulsa(avulsa) {
@@ -818,24 +947,26 @@
 
   async function calendarBuildScheduleView(container, { days, grid_class = "" }) {
     let schedule = calendarLoadSchedule();
-    let pending_subtasks = await calendarGetPendingSubtasks();
+    let calendar_subtasks = await calendarGetCalendarSubtasks();
     let pending_sessions = await calendarGetPendingSessions();
-    let pending_avulsas = await calendarGetPendingAvulsas();
+    let calendar_avulsas = await calendarGetCalendarAvulsas();
+    let pending_subtasks = calendarPendingItems(calendar_subtasks);
+    let pending_avulsas = calendarPendingItems(calendar_avulsas);
     const pending_map = new Map(
-      pending_subtasks.map(subtask => [calendarNormalizeId(subtask.id), subtask])
+      calendar_subtasks.map(subtask => [calendarNormalizeId(subtask.id), subtask])
     );
     const session_map = new Map(
       pending_sessions.map(session => [calendarNormalizeId(session.id), session])
     );
     const avulsa_map = new Map(
-      pending_avulsas.map(avulsa => [calendarNormalizeId(avulsa.id), avulsa])
+      calendar_avulsas.map(avulsa => [calendarNormalizeId(avulsa.id), avulsa])
     );
 
     schedule = calendarPruneSchedule(
       schedule,
-      new Set(pending_subtasks.map(subtask => calendarNormalizeId(subtask.id))),
-      new Set(pending_sessions.map(session => calendarNormalizeId(session.id))),
-      new Set(pending_avulsas.map(avulsa => calendarNormalizeId(avulsa.id)))
+      calendarItemIds(calendar_subtasks),
+      calendarItemIds(pending_sessions),
+      calendarItemIds(calendar_avulsas)
     );
 
     const getSchedule = () => schedule;
@@ -883,11 +1014,13 @@
     const render = async () => {
       const previous_scroll_top = body.scrollTop;
 
-      pending_subtasks = await calendarGetPendingSubtasks();
+      calendar_subtasks = await calendarGetCalendarSubtasks();
       pending_sessions = await calendarGetPendingSessions();
-      pending_avulsas = await calendarGetPendingAvulsas();
+      calendar_avulsas = await calendarGetCalendarAvulsas();
+      pending_subtasks = calendarPendingItems(calendar_subtasks);
+      pending_avulsas = calendarPendingItems(calendar_avulsas);
       pending_map.clear();
-      pending_subtasks.forEach(subtask => {
+      calendar_subtasks.forEach(subtask => {
         pending_map.set(calendarNormalizeId(subtask.id), subtask);
       });
       session_map.clear();
@@ -895,20 +1028,27 @@
         session_map.set(calendarNormalizeId(session.id), session);
       });
       avulsa_map.clear();
-      pending_avulsas.forEach(avulsa => {
+      calendar_avulsas.forEach(avulsa => {
         avulsa_map.set(calendarNormalizeId(avulsa.id), avulsa);
       });
       schedule = calendarPruneSchedule(
         schedule,
-        new Set(pending_subtasks.map(subtask => calendarNormalizeId(subtask.id))),
-        new Set(pending_sessions.map(session => calendarNormalizeId(session.id))),
-        new Set(pending_avulsas.map(avulsa => calendarNormalizeId(avulsa.id)))
+        calendarItemIds(calendar_subtasks),
+        calendarItemIds(pending_sessions),
+        calendarItemIds(calendar_avulsas)
       );
       schedule = calendarApplyRepeatsToWeek(
         schedule,
-        new Set(pending_subtasks.map(subtask => calendarNormalizeId(subtask.id))),
-        new Set(pending_sessions.map(session => calendarNormalizeId(session.id))),
-        new Set(pending_avulsas.map(avulsa => calendarNormalizeId(avulsa.id)))
+        {
+          subtasks: calendarItemIds(calendar_subtasks),
+          sessions: calendarItemIds(pending_sessions),
+          avulsas: calendarItemIds(calendar_avulsas)
+        },
+        {
+          subtasks: calendarItemIds(pending_subtasks),
+          sessions: calendarItemIds(pending_sessions),
+          avulsas: calendarItemIds(pending_avulsas)
+        }
       );
 
       body.innerHTML = "";
@@ -1160,6 +1300,11 @@
     const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
       "14", "/images/icon/done.png");
     actions.append(done_icon);
+    calendarPaintChipCompletion(
+      text,
+      done_icon,
+      calendarIsItemCompletedInSlot(getSchedule(), date_key, time, "subtask", subtask.id)
+    );
 
     calendarAppendRepeatCancel(actions, {
       kind: "subtask",
@@ -1175,20 +1320,21 @@
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
 
-    done_icon.addEventListener("click", async event => {
+    done_icon.addEventListener("click", event => {
       event.stopPropagation();
-
-      const response = await API.response(Subtask.update, {
-        id: subtask.id,
-        status: "Concluído"
-      });
-
-      if (!response) { return; }
-
-      calendarClearRepeat("subtask", subtask.id);
-      const next_schedule = calendarRemoveSubtaskFromAllSlots(getSchedule(), subtask.id);
+      const next_schedule = calendarToggleItemCompletedInSlot(
+        getSchedule(),
+        date_key,
+        time,
+        "subtask",
+        subtask.id
+      );
       onScheduleChange(next_schedule);
-      await onRefresh();
+      calendarPaintChipCompletion(
+        text,
+        done_icon,
+        calendarIsItemCompletedInSlot(next_schedule, date_key, time, "subtask", subtask.id)
+      );
     });
 
     remove_icon.addEventListener("click", event => {
@@ -1233,7 +1379,7 @@
     return row;
   }
 
-  function calendarPickerItemRow({ text, show_repeat, onClick }) {
+  function calendarPickerItemRow({ text, show_repeat, onEdit, onComplete, onClick }) {
     const row = lib.element.create("div", {
       class: "box b1 container pointer padding-5",
       style: "border-bottom: 1px solid var(--light);"
@@ -1246,8 +1392,31 @@
     }, text);
     row.append(label);
 
-    if (show_repeat) {
-      row.append(lib.element.icon("b10 opacity-out-08 v-center", "16", "/images/icon/refresh.png"));
+    let repeat_icon = null;
+    if (show_repeat || onEdit) {
+      repeat_icon = lib.element.icon("b10 opacity-out-08 v-center", "16", "/images/icon/refresh.png");
+      repeat_icon.style.display = show_repeat ? "" : "none";
+      row.append(repeat_icon);
+    }
+
+    if (onEdit) {
+      const edit_icon = lib.element.icon("b10 opacity-out-08 pointer v-center", "16", "/images/icon/edit.png");
+      edit_icon.title = "Editar";
+      row.append(edit_icon);
+      edit_icon.addEventListener("click", event => {
+        event.stopPropagation();
+        onEdit(row);
+      });
+    }
+
+    if (onComplete) {
+      const done_icon = lib.element.icon("b10 opacity-out-08 pointer v-center", "16", "/images/icon/done.png");
+      done_icon.title = "Concluir";
+      row.append(done_icon);
+      done_icon.addEventListener("click", event => {
+        event.stopPropagation();
+        onComplete(row);
+      });
     }
 
     if (onClick) {
@@ -1255,11 +1424,15 @@
     }
 
     row._pickerLabel = label;
+    row._repeatIcon = repeat_icon;
+    row._keepActions = Boolean(onEdit || onComplete);
     return row;
   }
 
   function calendarPickerMarkAdded(row, text) {
-    row.style.pointerEvents = "none";
+    if (!row._keepActions) {
+      row.style.pointerEvents = "none";
+    }
     row.classList.add("opacity-out-06");
     if (row._pickerLabel) {
       row._pickerLabel.classList.add("line-through");
@@ -1299,7 +1472,8 @@
       class: "calendar-session-chip ground border"
     });
 
-    chip.append(calendarSessionContentDiv(session));
+    const content = calendarSessionContentDiv(session);
+    chip.append(content);
 
     const actions = lib.element.create("div", {
       class: "calendar-subtask-actions"
@@ -1308,7 +1482,13 @@
 
     const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
       "14", "/images/icon/done.png");
+    done_icon.title = "Concluir treino";
     actions.append(done_icon);
+
+    const edit_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
+      "14", "/images/icon/edit.png");
+    edit_icon.title = "Editar treino";
+    actions.append(edit_icon);
 
     calendarAppendRepeatCancel(actions, {
       kind: "session",
@@ -1324,20 +1504,33 @@
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
 
-    done_icon.addEventListener("click", async event => {
+    calendarPaintChipCompletion(
+      content,
+      done_icon,
+      calendarIsItemCompletedInSlot(getSchedule(), date_key, time, "session", session.id)
+    );
+
+    edit_icon.addEventListener("click", async event => {
       event.stopPropagation();
+      if (typeof workoutOpenEditPopup !== "function") { return; }
+      await workoutOpenEditPopup(session, onRefresh);
+    });
 
-      const response = await API.response(Workout.update, {
-        id: session.id,
-        status: "Concluído"
-      });
-
-      if (!response) { return; }
-
-      calendarClearRepeat("session", session.id);
-      const next_schedule = calendarRemoveSessionFromAllSlots(getSchedule(), session.id);
+    done_icon.addEventListener("click", event => {
+      event.stopPropagation();
+      const next_schedule = calendarToggleItemCompletedInSlot(
+        getSchedule(),
+        date_key,
+        time,
+        "session",
+        session.id
+      );
       onScheduleChange(next_schedule);
-      await onRefresh();
+      calendarPaintChipCompletion(
+        content,
+        done_icon,
+        calendarIsItemCompletedInSlot(next_schedule, date_key, time, "session", session.id)
+      );
     });
 
     remove_icon.addEventListener("click", event => {
@@ -1375,6 +1568,11 @@
     const done_icon = lib.element.icon("calendar-subtask-action opacity-out-08 pointer",
       "14", "/images/icon/done.png");
     actions.append(done_icon);
+    calendarPaintChipCompletion(
+      text,
+      done_icon,
+      calendarIsItemCompletedInSlot(getSchedule(), date_key, time, "avulsa", avulsa.id)
+    );
 
     calendarAppendRepeatCancel(actions, {
       kind: "avulsa",
@@ -1390,27 +1588,21 @@
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
 
-    done_icon.addEventListener("click", async event => {
+    done_icon.addEventListener("click", event => {
       event.stopPropagation();
-
-      if (calendarIsRecurringAvulsa(avulsa)) {
-        const next_schedule = calendarRemoveAvulsaFromSlot(getSchedule(), date_key, time, avulsa.id);
-        onScheduleChange(next_schedule);
-        await onRefresh();
-        return;
-      }
-
-      const response = await API.response(Avulsa.update, {
-        id: avulsa.id,
-        status: "Concluído"
-      });
-
-      if (!response) { return; }
-
-      calendarClearRepeat("avulsa", avulsa.id);
-      const next_schedule = calendarRemoveAvulsaFromAllSlots(getSchedule(), avulsa.id);
+      const next_schedule = calendarToggleItemCompletedInSlot(
+        getSchedule(),
+        date_key,
+        time,
+        "avulsa",
+        avulsa.id
+      );
       onScheduleChange(next_schedule);
-      await onRefresh();
+      calendarPaintChipCompletion(
+        text,
+        done_icon,
+        calendarIsItemCompletedInSlot(next_schedule, date_key, time, "avulsa", avulsa.id)
+      );
     });
 
     remove_icon.addEventListener("click", event => {
@@ -1630,7 +1822,7 @@
               );
               current_schedule = next_schedule;
               onScheduleChange(next_schedule);
-              calendarRegisterRepeat("subtask", subtask_id, time, weekdays);
+              calendarRegisterRepeat("subtask", subtask_id, time, weekdays, weekday_picker.isEnabled());
               slot_subtask_ids.add(subtask_id);
 
               calendarPickerMarkAdded(subtask_button, subtask.description);
@@ -1662,7 +1854,7 @@
               weekdays,
               (schedule, slot_date, slot_time) => calendarAddSubtaskToSlot(schedule, slot_date, slot_time, subtask_id)
             );
-            calendarRegisterRepeat("subtask", subtask_id, time, weekdays);
+            calendarRegisterRepeat("subtask", subtask_id, time, weekdays, weekday_picker.isEnabled());
           });
 
           current_schedule = next_schedule;
@@ -1702,7 +1894,7 @@
           );
           current_schedule = next_schedule;
           onScheduleChange(next_schedule);
-          calendarRegisterRepeat("session", session_id, time, weekdays);
+          calendarRegisterRepeat("session", session_id, time, weekdays, weekday_picker.isEnabled());
           slot_session_ids.add(session_id);
 
           card.style.pointerEvents = "none";
@@ -1727,9 +1919,10 @@
     });
     avulsa_panel.append(avulsa_create_box);
 
-    avulsa_create_box.append(lib.element.create("div", {
+    const avulsa_form_title = lib.element.create("div", {
       class: "box b1 lucida-grande bold rem08 margin-bottom-5"
-    }, "Nova tarefa avulsa"));
+    }, "Nova tarefa avulsa");
+    avulsa_create_box.append(avulsa_form_title);
 
     const avulsa_description_row = calendarPickerFieldRow("/images/icon/description.png");
     avulsa_create_box.append(avulsa_description_row);
@@ -1763,14 +1956,87 @@
     }, "+ Criar e adicionar ao horário");
     avulsa_create_box.append(avulsa_create_button);
 
+    const avulsa_cancel_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 lucida-grande rem08 border pointer ground radius-5 padding-8 margin-top-5"
+    }, "Cancelar");
+    avulsa_cancel_button.style.display = "none";
+    avulsa_create_box.append(avulsa_cancel_button);
+
+    let editing_avulsa = null;
+    let editing_row = null;
+
+    const resetAvulsaForm = () => {
+      editing_avulsa = null;
+      editing_row = null;
+      avulsa_form_title.textContent = "Nova tarefa avulsa";
+      avulsa_create_button.textContent = "+ Criar e adicionar ao horário";
+      avulsa_description_input.value = "";
+      avulsa_recurrence_select.value = "Unica";
+      avulsa_cancel_button.style.display = "none";
+    };
+
+    const startAvulsaEdit = (avulsa, row) => {
+      editing_avulsa = avulsa;
+      editing_row = row;
+      avulsa_form_title.textContent = "Editar tarefa avulsa";
+      avulsa_create_button.textContent = "Salvar alterações";
+      avulsa_description_input.value = avulsa.description;
+      avulsa_recurrence_select.value = calendarIsRecurringAvulsa(avulsa) ? "Recorrente" : "Unica";
+      avulsa_cancel_button.style.display = "";
+      avulsa_description_input.focus();
+      avulsa_create_box.scrollIntoView({ block: "nearest" });
+    };
+
+    const saveAvulsaEdit = async () => {
+      const description = avulsa_description_input.value.trim();
+      if (!description) {
+        return lib.message("Informe a descrição da tarefa avulsa.");
+      }
+
+      const recurrence_type = avulsa_recurrence_select.value === "Recorrente"
+        ? "Recorrente"
+        : "Unica";
+      const was_recurring = calendarIsRecurringAvulsa(editing_avulsa);
+      const response = await API.response(Avulsa.update, {
+        id: editing_avulsa.id,
+        description,
+        recurrence_type
+      });
+      if (!response) { return; }
+
+      editing_avulsa.description = description;
+      editing_avulsa.recurrence_type = recurrence_type;
+
+      if (was_recurring && recurrence_type !== "Recorrente") {
+        calendarClearRepeat("avulsa", editing_avulsa.id);
+      }
+
+      if (editing_row?._pickerLabel) {
+        editing_row._pickerLabel.textContent = description;
+        editing_row._pickerLabel.classList.remove("line-through");
+      }
+      if (editing_row?._repeatIcon) {
+        editing_row._repeatIcon.style.display = recurrence_type === "Recorrente" ? "" : "none";
+      }
+
+      await onRefresh();
+      lib.message(response.done);
+      resetAvulsaForm();
+    };
+
     const createAvulsaAndAdd = async () => {
+      if (editing_avulsa) {
+        return saveAvulsaEdit();
+      }
+
       const description = avulsa_description_input.value.trim();
       if (!description) {
         return lib.message("Informe a descrição da tarefa avulsa.");
       }
 
       const weekdays = weekday_picker.getWeekdays();
-      const recurrence_type = weekdays.length > 1 || avulsa_recurrence_select.value === "Recorrente"
+      const recurrence_type = weekday_picker.isEnabled() || avulsa_recurrence_select.value === "Recorrente"
         ? "Recorrente"
         : "Unica";
 
@@ -1801,6 +2067,7 @@
     };
 
     avulsa_create_button.addEventListener("click", createAvulsaAndAdd);
+    avulsa_cancel_button.addEventListener("click", resetAvulsaForm);
     avulsa_description_input.addEventListener("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1809,9 +2076,10 @@
     });
 
     if (available_avulsas.length) {
-      avulsa_panel.append(lib.element.create("div", {
+      const pendentes_title = lib.element.create("div", {
         class: "box b1 lucida-grande rem08 bold padding-3 margin-bottom-5"
-      }, "Pendentes"));
+      }, "Pendentes");
+      avulsa_panel.append(pendentes_title);
 
       const avulsa_list = lib.element.create("div", {
         class: "box b1 container ground border radius-5 scroll-y-auto",
@@ -1823,18 +2091,43 @@
         const avulsa_button = calendarPickerItemRow({
           text: avulsa.description,
           show_repeat: calendarIsRecurringAvulsa(avulsa),
+          onEdit: row => startAvulsaEdit(avulsa, row),
+          onComplete: async () => {
+            const avulsa_id = calendarNormalizeId(avulsa.id);
+            const response = await API.response(Avulsa.update, {
+              id: avulsa_id,
+              status: "Concluído"
+            });
+            if (!response) { return; }
+
+            if (editing_avulsa && calendarNormalizeId(editing_avulsa.id) === avulsa_id) {
+              resetAvulsaForm();
+            }
+
+            avulsa_button.remove();
+            if (!avulsa_list.children.length) {
+              pendentes_title.remove();
+              avulsa_list.remove();
+            }
+
+            await onRefresh();
+          },
           onClick: async event => {
             event.stopPropagation();
+            if (avulsa_button._added) { return; }
 
             const avulsa_id = calendarNormalizeId(avulsa.id);
             const weekdays = weekday_picker.getWeekdays();
 
-            if (weekdays.length > 1 && !calendarIsRecurringAvulsa(avulsa)) {
+            if (weekday_picker.isEnabled() && !calendarIsRecurringAvulsa(avulsa)) {
               await API.response(Avulsa.update, {
                 id: avulsa_id,
                 recurrence_type: "Recorrente"
               });
               avulsa.recurrence_type = "Recorrente";
+              if (avulsa_button._repeatIcon) {
+                avulsa_button._repeatIcon.style.display = "";
+              }
             }
 
             const next_schedule = calendarAddToWeekdays(
@@ -1848,6 +2141,7 @@
             calendarRegisterRepeat("avulsa", avulsa_id, time, weekdays, calendarIsRecurringAvulsa(avulsa));
             slot_avulsa_ids.add(avulsa_id);
 
+            avulsa_button._added = true;
             calendarPickerMarkAdded(avulsa_button, avulsa.description);
 
             await onRefresh();

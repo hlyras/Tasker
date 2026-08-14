@@ -1,9 +1,11 @@
 <div class="box b1 container margin-top-5 calendar-home-section">
   <button type="button" id="calendar-home-toggle"
     class="calendar-home-toggle mobile-box container pointer ground border padding-8"
+    style="position: relative; flex-wrap: nowrap;"
     aria-expanded="false" aria-controls="calendar-home-panel">
-    <span class="mobile-box a1 lucida-grande rem08 bold v-center">Calendário</span>
-    <span id="calendar-home-toggle-icon" class="calendar-home-toggle-icon">▶</span>
+    <span id="calendar-home-toggle-icon" class="calendar-home-toggle-icon"
+      style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%);">▶</span>
+    <span class="box b1 lucida-grande rem08 bold center">Calendário</span>
   </button>
 
   <div id="calendar-home-panel" class="display-none">

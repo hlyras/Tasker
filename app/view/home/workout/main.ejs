@@ -9,23 +9,29 @@
 
   function workoutExerciseRow(exercise = {}) {
     const row = lib.element.create("div", {
-      class: "mobile-box container workout-exercise-row margin-bottom-5"
+      class: "box b1 container workout-exercise-row ground border radius-5 padding-10 margin-bottom-5"
     });
 
     const name_input = lib.element.create("input", {
       type: "text",
-      class: "mobile-box a1 lucida-grande rem08 border padding-5",
+      class: "box b1 lucida-grande rem08 border padding-5",
       placeholder: "Exercício",
       value: exercise.name || ""
     });
     row.append(name_input);
 
+    const details = lib.element.create("div", {
+      class: "box b1 container margin-top-5",
+      style: "flex-wrap: nowrap;"
+    });
+    row.append(details);
+
     const measure_select = lib.element.create("select", {
-      class: "mobile-box b15 lucida-grande rem08 border padding-5 margin-left-5"
+      class: "mobile-box b4 lucida-grande rem08 border padding-5"
     });
     measure_select.append(lib.element.create("option", { value: "reps" }, "Reps"));
     measure_select.append(lib.element.create("option", { value: "km" }, "Km"));
-    row.append(measure_select);
+    details.append(measure_select);
 
     const value = exercise.km != null && exercise.km !== ""
       ? parseFloat(exercise.km)
@@ -39,17 +45,18 @@
       type: "number",
       min: "0",
       step: "any",
-      class: "mobile-box b15 lucida-grande rem08 border padding-5 margin-left-5",
+      class: "mobile-box flex-1 lucida-grande rem08 border padding-5 margin-left-5",
       placeholder: "Qtd",
       value: value
     });
-    row.append(value_input);
+    details.append(value_input);
 
     const remove_button = lib.element.create("button", {
       type: "button",
-      class: "mobile-box b10 lucida-grande rem08 border pointer ground margin-left-5"
+      class: "mobile-box b10 lucida-grande rem08 border pointer ground margin-left-5",
+      title: "Remover exercício"
     }, "×");
-    row.append(remove_button);
+    details.append(remove_button);
 
     remove_button.addEventListener("click", () => {
       row.remove();
@@ -70,15 +77,147 @@
       .filter(exercise => exercise.name);
   }
 
-  async function workoutPopup() {
-    const popup = lib.element.create("div", {
-      class: "box b1 container workout-popup padding-10"
+  function workoutEditorBox(session, { title_text, button_text, onSubmit, onCancel }) {
+    const box = lib.element.create("div", {
+      class: "box b1 container workout-create-box ground border radius-5 padding-10"
     });
+
+    box.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 margin-bottom-5"
+    }, title_text));
+
+    const name_input = lib.element.create("input", {
+      type: "text",
+      class: "box b1 lucida-grande rem08 border padding-5 margin-bottom-10",
+      placeholder: "Nome da sessão (ex: Treino A, Corrida)",
+      value: session?.name || ""
+    });
+    box.append(name_input);
+
+    const exercises_box = lib.element.create("div", {
+      class: "box b1 container workout-exercises-box margin-bottom-5"
+    });
+    box.append(exercises_box);
+
+    const exercises = session?.exercises || [];
+    if (exercises.length) {
+      exercises.forEach(exercise => exercises_box.append(workoutExerciseRow(exercise)));
+    } else {
+      exercises_box.append(workoutExerciseRow());
+    }
+
+    const add_exercise_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 lucida-grande rem08 bold pointer padding-8 margin-bottom-10 radius-5",
+      style: "border: 1px dashed #245ae5; color: #245ae5; background: var(--ground);"
+    }, "+ Exercício");
+    box.append(add_exercise_button);
+
+    add_exercise_button.addEventListener("click", () => {
+      exercises_box.append(workoutExerciseRow());
+    });
+
+    const save_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 btn-act lucida-grande bold noborder radius-5 padding-10 pointer noselect"
+    }, button_text);
+    box.append(save_button);
+
+    if (onCancel) {
+      const cancel_button = lib.element.create("button", {
+        type: "button",
+        class: "box b1 lucida-grande rem08 border pointer ground radius-5 padding-10 margin-top-5"
+      }, "Cancelar");
+      box.append(cancel_button);
+      cancel_button.addEventListener("click", onCancel);
+    }
+
+    save_button.addEventListener("click", async () => {
+      const name = name_input.value.trim();
+      const collected = workoutCollectExercises(exercises_box);
+
+      if (!name) {
+        return lib.message("Informe o nome da sessão de treino.");
+      }
+
+      if (!collected.length) {
+        return lib.message("Adicione pelo menos um exercício.");
+      }
+
+      await onSubmit({ name, exercises: collected });
+    });
+
+    return box;
+  }
+
+  async function workoutSaveSession(payload, session) {
+    if (session?.id) {
+      return API.response(Workout.update, {
+        id: session.id,
+        name: payload.name,
+        exercises: payload.exercises
+      });
+    }
+
+    return API.response(Workout.create, payload);
+  }
+
+  async function workoutOpenEditPopup(session, onSaved) {
+    const popup = lib.element.create("div", {
+      class: "box b1 container h-center"
+    });
+
+    const menu = lib.element.create("div", {
+      class: "box b2-3 container padding-10"
+    });
+    popup.append(menu);
 
     const title_box = lib.element.create("div", {
       class: "mobile-box container center margin-bottom-10"
     });
-    popup.append(title_box);
+    menu.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Editar treino"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/workout.png"
+    }));
+
+    menu.append(workoutEditorBox(session, {
+      title_text: "Editar sessão de treino",
+      button_text: "Salvar alterações",
+      onSubmit: async payload => {
+        const response = await workoutSaveSession(payload, session);
+        if (!response) { return; }
+
+        lib.message(response.done, async () => {
+          lib.popout();
+          if (onSaved) { await onSaved(); }
+        });
+      },
+      onCancel: () => lib.popout()
+    }));
+
+    lib.popup(popup, false, true);
+  }
+
+  async function workoutPopup() {
+    const popup = lib.element.create("div", {
+      class: "box b1 container h-center"
+    });
+
+    const menu = lib.element.create("div", {
+      class: "box b2-3 container padding-10"
+    });
+    popup.append(menu);
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    menu.append(title_box);
 
     title_box.append(lib.element.create("div", {
       class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
@@ -93,46 +232,12 @@
       id: "workout-sessions-box",
       class: "box b1 container workout-sessions-box scroll-y-auto margin-bottom-10"
     });
-    popup.append(sessions_box);
+    menu.append(sessions_box);
 
-    const create_box = lib.element.create("div", {
-      class: "box b1 container workout-create-box ground border padding-10"
+    const editor_host = lib.element.create("div", {
+      class: "box b1 container"
     });
-    popup.append(create_box);
-
-    create_box.append(lib.element.create("div", {
-      class: "box b1 lucida-grande bold rem08 margin-bottom-5"
-    }, "Nova sessão de treino"));
-
-    const name_input = lib.element.create("input", {
-      type: "text",
-      class: "box b1 lucida-grande rem08 border padding-5 margin-bottom-5",
-      placeholder: "Nome da sessão (ex: Treino A, Corrida)"
-    });
-    create_box.append(name_input);
-
-    const exercises_box = lib.element.create("div", {
-      class: "box b1 container workout-exercises-box margin-bottom-5"
-    });
-    create_box.append(exercises_box);
-
-    exercises_box.append(workoutExerciseRow());
-
-    const add_exercise_button = lib.element.create("button", {
-      type: "button",
-      class: "box b1 lucida-grande rem08 border pointer ground padding-5 margin-bottom-5"
-    }, "+ Exercício");
-    create_box.append(add_exercise_button);
-
-    const save_button = lib.element.create("button", {
-      type: "button",
-      class: "box b4 btn-act lucida-grande bold noborder padding-10 pointer noselect"
-    }, "Salvar sessão");
-    create_box.append(save_button);
-
-    add_exercise_button.addEventListener("click", () => {
-      exercises_box.append(workoutExerciseRow());
-    });
+    menu.append(editor_host);
 
     const renderSessions = async () => {
       sessions_box.innerHTML = "";
@@ -148,84 +253,102 @@
       }
 
       sessions.forEach(session => {
-        sessions_box.append(workoutSessionDiv(session, renderSessions));
+        sessions_box.append(workoutSessionDiv(session, {
+          onRefresh: renderSessions,
+          onEdit: session_to_edit => mountEditor(session_to_edit)
+        }));
       });
     };
 
-    save_button.addEventListener("click", async () => {
-      const name = name_input.value.trim();
-      const exercises = workoutCollectExercises(exercises_box);
+    const mountEditor = session => {
+      editor_host.innerHTML = "";
+      editor_host.append(workoutEditorBox(session, {
+        title_text: session ? "Editar sessão de treino" : "Nova sessão de treino",
+        button_text: session ? "Salvar alterações" : "Salvar sessão",
+        onSubmit: async payload => {
+          const response = await workoutSaveSession(payload, session);
+          if (!response) { return; }
 
-      if (!name) {
-        return lib.message("Informe o nome da sessão de treino.");
+          lib.message(response.done, async () => {
+            mountEditor(null);
+            await renderSessions();
+          });
+        },
+        onCancel: session ? () => mountEditor(null) : null
+      }));
+
+      if (session) {
+        editor_host.scrollIntoView({ block: "nearest" });
       }
+    };
 
-      if (!exercises.length) {
-        return lib.message("Adicione pelo menos um exercício.");
-      }
-
-      const response = await API.response(Workout.create, { name, exercises });
-      if (!response) { return; }
-
-      name_input.value = "";
-      exercises_box.innerHTML = "";
-      exercises_box.append(workoutExerciseRow());
-
-      lib.message(response.done, async () => {
-        await renderSessions();
-      });
-    });
-
+    mountEditor(null);
     await renderSessions();
 
     return popup;
   }
 
-  function workoutSessionDiv(session, onRefresh) {
+  function workoutSessionDiv(session, { onRefresh, onEdit }) {
     const session_div = lib.element.create("div", {
-      class: "box b1 container workout-session-item ground border padding-5 margin-bottom-10"
+      class: "box b2 container workout-session-item ground border radius-5 padding-10 margin-bottom-10"
     });
 
     const header = lib.element.create("div", {
-      class: "mobile-box container padding-3"
+      class: "box b1 container",
+      style: "flex-wrap: nowrap;"
     });
     session_div.append(header);
 
-    header.append(lib.element.create("div", {
-      class: "mobile-box a1 lucida-grande rem08 bold v-center"
+    const info = lib.element.create("div", {
+      class: "mobile-box flex-1"
+    });
+    header.append(info);
+
+    info.append(lib.element.create("div", {
+      class: "box b1 lucida-grande rem08 bold wrap"
     }, session.name));
 
-    const done_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer margin-right-5",
-      "18", "/images/icon/done.png");
-    header.append(done_icon);
-
-    const delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
-      "18", "/images/icon/trash.png");
-    header.append(delete_icon);
-
-    const exercises_list = lib.element.create("div", {
-      class: "box b1 container workout-session-exercises margin-top-5"
-    });
-    session_div.append(exercises_list);
-
     (session.exercises || []).forEach(exercise => {
-      exercises_list.append(lib.element.create("div", {
-        class: "box b1 lucida-grande rem07 opacity-out-08 padding-3"
+      info.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem07 opacity-out-08 margin-top-5 wrap"
       }, workoutFormatExercise(exercise)));
     });
 
-    done_icon.addEventListener("click", async () => {
-      const response = await API.response(Workout.update, {
-        id: session.id,
-        status: "Concluído"
-      });
+    const actions = lib.element.create("div", {
+      class: "mobile-box container",
+      style: "flex-wrap: nowrap;"
+    });
+    header.append(actions);
 
-      if (!response) { return; }
+    const edit_button = lib.element.create("button", {
+      type: "button",
+      class: "mobile-box pointer border radius-5 padding-5 margin-left-5",
+      style: "background: var(--background);",
+      title: "Editar sessão"
+    });
+    edit_button.append(lib.element.create("img", {
+      class: "image-prop size-18",
+      src: "/images/icon/edit.png"
+    }));
+    actions.append(edit_button);
 
-      await onRefresh();
+    const delete_button = lib.element.create("button", {
+      type: "button",
+      class: "mobile-box pointer border radius-5 padding-5 margin-left-5",
+      style: "background: #fee2e2; border-color: #fecaca;",
+      title: "Excluir sessão"
+    });
+    delete_button.append(lib.element.create("img", {
+      class: "image-prop size-18",
+      src: "/images/icon/trash.png"
+    }));
+    actions.append(delete_button);
+
+    edit_button.addEventListener("click", () => {
+      onEdit(session);
     });
 
-    delete_icon.addEventListener("click", async () => {
+    delete_button.addEventListener("click", async () => {
       lib.confirm("Deseja excluir a sessão de treino?", async r => {
         if (r) { return; }
 
