@@ -7,7 +7,7 @@
   </button>
 
   <div id="calendar-home-panel" class="display-none">
-    <div id="calendar-day-tabs" class="calendar-day-tabs mobile-box container margin-bottom-10 margin-top-10"></div>
+    <div id="calendar-day-tabs" class="calendar-day-tabs box b1 container margin-bottom-10 margin-top-10"></div>
     <div id="calendar-home-container" class="box b1 container calendar-home"></div>
   </div>
 </div>
@@ -44,6 +44,12 @@
       const is_hidden = document.getElementById("calendar-home-panel")?.classList.contains("display-none");
       calendarSetHomeVisible(is_hidden);
     });
+
+    document.addEventListener("visibilitychange", async () => {
+      if (document.hidden) { return; }
+      if (!calendarWeekDidChange()) { return; }
+      await calendarRenderHomeDay(calendarTodayIndex());
+    });
   });
 
   function calendarBuildHomeDayTabs() {
@@ -56,12 +62,8 @@
     days.forEach((day, index) => {
       const tab = lib.element.create("button", {
         type: "button",
-        class: "calendar-day-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8"
+        class: "calendar-day-tab mobile-box a7 lucida-grande rem07 bold border pointer ground padding-5 nowrap"
       }, calendarDayLabel(day));
-
-      if (index > 0) {
-        tab.classList.add("margin-left-5");
-      }
 
       tab.addEventListener("click", async () => {
         if (calendarHomeDayIndex === index) { return; }

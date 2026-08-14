@@ -6202,7 +6202,7 @@ textarea,
 .calendar-header-row,
 .calendar-row {
   display: grid;
-  grid-template-columns: 52px repeat(3, minmax(160px, 1fr));
+  grid-template-columns: 52px repeat(7, minmax(0, 1fr));
   gap: 4px;
   align-items: stretch;
 }
@@ -6501,7 +6501,7 @@ textarea,
 @media (max-width: 900px) {
   .calendar-header-row,
   .calendar-row {
-    grid-template-columns: 44px repeat(3, minmax(120px, 1fr));
+    grid-template-columns: 44px repeat(7, minmax(0, 1fr));
   }
 
   .calendar-grid-today .calendar-header-row,

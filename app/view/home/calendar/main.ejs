@@ -1,6 +1,6 @@
 <script>
   const CALENDAR_STORAGE_KEY = "tasker-calendar-schedule";
-  const CALENDAR_DAYS_AHEAD = 2;
+  const CALENDAR_WEEK_DAYS = 7;
   const CALENDAR_START_HOUR = 6;
   const CALENDAR_END_HOUR = 21;
 
@@ -15,18 +15,28 @@
     return `${year}-${month}-${day}`;
   }
 
-  function calendarGetDays() {
-    const days = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  function calendarGetWeekStart(date = new Date()) {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - start.getDay());
+    return start;
+  }
 
-    for (let i = 0; i <= CALENDAR_DAYS_AHEAD; i++) {
-      const day = new Date(today);
-      day.setDate(day.getDate() + i);
+  function calendarGetDays() {
+    const start = calendarGetWeekStart();
+    const days = [];
+
+    for (let i = 0; i < CALENDAR_WEEK_DAYS; i++) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
       days.push(day);
     }
 
     return days;
+  }
+
+  function calendarTodayIndex() {
+    return new Date().getDay();
   }
 
   function calendarGetTimeSlots() {
@@ -83,11 +93,11 @@
   }
 
   function calendarCleanSchedule(schedule) {
-    const today_key = calendarDateKey(new Date());
+    const week_start_key = calendarDateKey(calendarGetWeekStart());
     const cleaned = {};
 
     Object.keys(schedule).forEach(date_key => {
-      if (date_key < today_key) { return; }
+      if (date_key < week_start_key) { return; }
 
       const day_slots = schedule[date_key] || {};
       const cleaned_day = {};
@@ -407,6 +417,14 @@
   }
 
   let calendarHomeRefresh = null;
+  let calendarActiveWeekStart = null;
+
+  function calendarWeekDidChange() {
+    const week_start = calendarDateKey(calendarGetWeekStart());
+    if (calendarActiveWeekStart === week_start) { return false; }
+    calendarActiveWeekStart = week_start;
+    return true;
+  }
 
   async function calendarBuildScheduleView(container, { days, grid_class = "" }) {
     let schedule = calendarLoadSchedule();
@@ -561,12 +579,22 @@
     const container = document.getElementById("calendar-home-container");
     if (!container) { return; }
 
-    calendarHomeDayIndex = day_index;
-    container.innerHTML = "";
+    if (calendarWeekDidChange()) {
+      day_index = calendarTodayIndex();
+    }
 
     const all_days = calendarGetDays();
-    const day = all_days[day_index];
+    const safe_index = all_days[day_index] ? day_index : calendarTodayIndex();
+
+    calendarHomeDayIndex = safe_index;
+    container.innerHTML = "";
+
+    const day = all_days[safe_index];
     if (!day) { return; }
+
+    if (typeof calendarBuildHomeDayTabs === "function") {
+      calendarBuildHomeDayTabs();
+    }
 
     calendarHomeRefresh = await calendarBuildScheduleView(container, {
       days: [day],
@@ -577,7 +605,7 @@
   }
 
   async function calendarInitHome() {
-    await calendarRenderHomeDay(0);
+    await calendarRenderHomeDay(calendarTodayIndex());
   }
 
   async function calendarPopup() {
@@ -764,13 +792,65 @@
     return content;
   }
 
-  function calendarSessionPickerCard(session, onSelect) {
-    const card = lib.element.create("button", {
-      type: "button",
-      class: "calendar-picker-session lucida-grande rem08 border pointer ground padding-5 margin-top-5"
+  function calendarPickerGripIcon() {
+    return lib.element.svg("b10 opacity-out-08 v-center", "16",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+  }
+
+  function calendarPickerFieldRow(icon_src) {
+    const row = lib.element.create("div", {
+      class: "box b1 container border margin-bottom-5"
+    });
+    row.append(lib.element.icon("b10 opacity-out-08 v-center", "16", icon_src));
+    return row;
+  }
+
+  function calendarPickerItemRow({ text, show_repeat, onClick }) {
+    const row = lib.element.create("div", {
+      class: "box b1 container pointer padding-5",
+      style: "border-bottom: 1px solid var(--light);"
     });
 
-    card.append(calendarSessionContentDiv(session));
+    row.append(calendarPickerGripIcon());
+
+    const label = lib.element.create("div", {
+      class: "mobile-box flex-1 lucida-grande rem08 v-center wrap"
+    }, text);
+    row.append(label);
+
+    if (show_repeat) {
+      row.append(lib.element.icon("b10 opacity-out-08 v-center", "16", "/images/icon/refresh.png"));
+    }
+
+    if (onClick) {
+      row.addEventListener("click", onClick);
+    }
+
+    row._pickerLabel = label;
+    return row;
+  }
+
+  function calendarPickerMarkAdded(row, text) {
+    row.style.pointerEvents = "none";
+    row.classList.add("opacity-out-06");
+    if (row._pickerLabel) {
+      row._pickerLabel.classList.add("line-through");
+      row._pickerLabel.textContent = `${text} (adicionada)`;
+    }
+  }
+
+  function calendarSessionPickerCard(session, onSelect) {
+    const card = lib.element.create("div", {
+      class: "box b1 container pointer padding-5",
+      style: "border-bottom: 1px solid var(--light); text-align: left;"
+    });
+
+    card.append(calendarPickerGripIcon());
+
+    const content = calendarSessionContentDiv(session);
+    content.className = "mobile-box flex-1";
+    card.append(content);
 
     card.addEventListener("click", async event => {
       event.stopPropagation();
@@ -937,11 +1017,11 @@
     });
 
     const popup_content = lib.element.create("div", {
-      class: "box b1 container calendar-subtask-picker-popup"
+      class: "box b1 container padding-10"
     });
 
     const title_box = lib.element.create("div", {
-      class: "mobile-box container center margin-bottom-10"
+      class: "box b1 container h-center"
     });
     popup_content.append(title_box);
 
@@ -950,73 +1030,93 @@
     }, "Adicionar ao horário"));
 
     title_box.append(lib.element.create("img", {
-      class: "image-prop size-25",
+      class: "image-prop size-20 v-center",
       src: "/images/icon/calendar.png"
     }));
 
-    popup_content.append(lib.element.create("div", {
-      class: "calendar-picker-slot-label lucida-grande rem08 opacity-out-08 center margin-bottom-10"
+    const slot_box = lib.element.create("div", {
+      class: "box b1 container h-center margin-bottom-10"
+    });
+    popup_content.append(slot_box);
+
+    slot_box.append(lib.element.create("img", {
+      class: "image-prop size-18 v-center opacity-out-08",
+      src: "/images/icon/time.png"
+    }));
+    slot_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande rem08 opacity-out-08 padding-5 v-center"
     }, calendarFormatSlotLabel(date_key, time)));
 
     const tabs_box = lib.element.create("div", {
-      class: "calendar-picker-tabs mobile-box container margin-bottom-10"
+      class: "box b1 container border radius-5 margin-bottom-10",
+      style: "overflow: hidden; background: var(--background);"
     });
     popup_content.append(tabs_box);
 
+    const tab_class = "mobile-box a3 lucida-grande rem08 bold pointer padding-8 noborder";
+    const tab_base_style = "text-align: center; border-radius: 0;";
+
     const tasks_tab = lib.element.create("button", {
       type: "button",
-      class: "calendar-picker-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8"
+      class: tab_class,
+      style: `${tab_base_style} border-right: 1px solid var(--light);`
     }, "Tarefas");
     tabs_box.append(tasks_tab);
 
     const workout_tab = lib.element.create("button", {
       type: "button",
-      class: "calendar-picker-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8 margin-left-5"
+      class: tab_class,
+      style: `${tab_base_style} border-right: 1px solid var(--light);`
     }, "Treino");
     tabs_box.append(workout_tab);
 
     const avulsa_tab = lib.element.create("button", {
       type: "button",
-      class: "calendar-picker-tab mobile-box a1 lucida-grande rem08 bold border pointer ground padding-8 margin-left-5"
+      class: tab_class,
+      style: tab_base_style
     }, "Avulsa");
     tabs_box.append(avulsa_tab);
 
     const tasks_panel = lib.element.create("div", {
-      class: "calendar-picker-panel"
+      class: "box b1 container"
     });
     popup_content.append(tasks_panel);
 
     const workout_panel = lib.element.create("div", {
-      class: "calendar-picker-panel",
+      class: "box b1 container",
       style: "display: none;"
     });
     popup_content.append(workout_panel);
 
     const avulsa_panel = lib.element.create("div", {
-      class: "calendar-picker-panel",
+      class: "box b1 container",
       style: "display: none;"
     });
     popup_content.append(avulsa_panel);
 
     const tasks_list = lib.element.create("div", {
-      class: "calendar-picker-list scroll-y-auto"
+      class: "box b1 container ground border radius-5 scroll-y-auto",
+      style: "max-height: 50vh;"
     });
     tasks_panel.append(tasks_list);
 
     const workout_list = lib.element.create("div", {
-      class: "calendar-picker-list scroll-y-auto"
+      class: "box b1 container ground border radius-5 scroll-y-auto",
+      style: "max-height: 50vh;"
     });
     workout_panel.append(workout_list);
 
-    const avulsa_list = lib.element.create("div", {
-      class: "calendar-picker-list scroll-y-auto"
-    });
-    avulsa_panel.append(avulsa_list);
-
     const setActiveTab = tab => {
-      tasks_tab.classList.toggle("calendar-picker-tab-active", tab === "tasks");
-      workout_tab.classList.toggle("calendar-picker-tab-active", tab === "workout");
-      avulsa_tab.classList.toggle("calendar-picker-tab-active", tab === "avulsa");
+      const apply = (button, active, divider) => {
+        button.style.background = active ? "var(--ground)" : "var(--background)";
+        button.style.color = active ? "#245ae5" : "inherit";
+        button.style.borderBottom = active ? "2px solid #245ae5" : "2px solid transparent";
+        button.style.borderRight = divider ? "1px solid var(--light)" : "none";
+      };
+
+      apply(tasks_tab, tab === "tasks", true);
+      apply(workout_tab, tab === "workout", true);
+      apply(avulsa_tab, tab === "avulsa", false);
       tasks_panel.style.display = tab === "tasks" ? "" : "none";
       workout_panel.style.display = tab === "workout" ? "" : "none";
       avulsa_panel.style.display = tab === "avulsa" ? "" : "none";
@@ -1043,53 +1143,50 @@
         if (!available_subtasks.length) { return; }
 
         const task_group = lib.element.create("div", {
-          class: "calendar-picker-task ground border margin-bottom-10 padding-5"
+          class: "box b1 container ground padding-5",
+          style: "border-bottom: 1px solid var(--light);"
         });
         tasks_list.append(task_group);
 
         const task_title = lib.element.create("button", {
           type: "button",
-          class: "calendar-picker-task-title calendar-picker-task-select lucida-grande rem08 bold padding-3 border pointer ground"
+          class: "box b1 lucida-grande rem08 bold padding-5 border pointer ground"
         }, group.task.description);
         task_group.append(task_title);
 
         if (group.task.milestone_description) {
           task_group.append(lib.element.create("div", {
-            class: "calendar-picker-task-meta lucida-grande rem07 opacity-out-08 padding-3"
+            class: "box b1 lucida-grande rem07 opacity-out-08 padding-3"
           }, group.task.milestone_description));
         }
 
         const subtask_buttons = [];
 
         available_subtasks.forEach(subtask => {
-          const subtask_button = lib.element.create("button", {
-            type: "button",
-            class: "calendar-picker-subtask lucida-grande rem08 border pointer ground padding-5 margin-top-5"
-          }, subtask.description);
+          const subtask_button = calendarPickerItemRow({
+            text: subtask.description,
+            onClick: async event => {
+              event.stopPropagation();
+
+              const subtask_id = calendarNormalizeId(subtask.id);
+              const next_schedule = calendarAddSubtaskToSlot(current_schedule, date_key, time, subtask_id);
+              current_schedule = next_schedule;
+              onScheduleChange(next_schedule);
+              slot_subtask_ids.add(subtask_id);
+
+              calendarPickerMarkAdded(subtask_button, subtask.description);
+
+              if (subtask_buttons.every(item => item.subtask_button.style.pointerEvents === "none")) {
+                task_title.disabled = true;
+                task_title.classList.add("opacity-out-06", "line-through");
+                task_title.textContent = `${group.task.description} (todas adicionadas)`;
+              }
+
+              await onRefresh();
+            }
+          });
           task_group.append(subtask_button);
           subtask_buttons.push({ subtask, subtask_button });
-
-          subtask_button.addEventListener("click", async event => {
-            event.stopPropagation();
-
-            const subtask_id = calendarNormalizeId(subtask.id);
-            const next_schedule = calendarAddSubtaskToSlot(current_schedule, date_key, time, subtask_id);
-            current_schedule = next_schedule;
-            onScheduleChange(next_schedule);
-            slot_subtask_ids.add(subtask_id);
-
-            subtask_button.disabled = true;
-            subtask_button.classList.add("opacity-out-06", "line-through");
-            subtask_button.textContent = `${subtask.description} (adicionada)`;
-
-            if (subtask_buttons.every(item => item.subtask_button.disabled)) {
-              task_title.disabled = true;
-              task_title.classList.add("opacity-out-06", "line-through");
-              task_title.textContent = `${group.task.description} (todas adicionadas)`;
-            }
-
-            await onRefresh();
-          });
         });
 
         task_title.addEventListener("click", async event => {
@@ -1103,9 +1200,7 @@
           subtask_ids.forEach(subtask_id => slot_subtask_ids.add(subtask_id));
 
           subtask_buttons.forEach(({ subtask, subtask_button }) => {
-            subtask_button.disabled = true;
-            subtask_button.classList.add("opacity-out-06", "line-through");
-            subtask_button.textContent = `${subtask.description} (adicionada)`;
+            calendarPickerMarkAdded(subtask_button, subtask.description);
           });
 
           task_title.disabled = true;
@@ -1132,10 +1227,10 @@
           onScheduleChange(next_schedule);
           slot_session_ids.add(session_id);
 
-          card.disabled = true;
-          card.classList.add("opacity-out-06", "calendar-picker-session-added");
+          card.style.pointerEvents = "none";
+          card.classList.add("opacity-out-06");
           card.append(lib.element.create("div", {
-            class: "calendar-picker-added-label lucida-grande rem07 opacity-out-08 margin-top-5"
+            class: "box b1 lucida-grande rem07 opacity-out-08 margin-top-5"
           }, "Adicionada ao horário"));
 
           await onRefresh();
@@ -1150,25 +1245,31 @@
     }
 
     const avulsa_create_box = lib.element.create("div", {
-      class: "box b1 container calendar-avulsa-create ground border padding-10 margin-bottom-10"
+      class: "box b1 container ground border radius-5 padding-10 margin-bottom-10"
     });
-    avulsa_list.append(avulsa_create_box);
+    avulsa_panel.append(avulsa_create_box);
 
     avulsa_create_box.append(lib.element.create("div", {
       class: "box b1 lucida-grande bold rem08 margin-bottom-5"
     }, "Nova tarefa avulsa"));
 
+    const avulsa_description_row = calendarPickerFieldRow("/images/icon/description.png");
+    avulsa_create_box.append(avulsa_description_row);
+
     const avulsa_description_input = lib.element.create("input", {
       type: "text",
-      class: "box b1 lucida-grande rem08 border padding-5 margin-bottom-5",
+      class: "mobile-box flex-1 lucida-grande rem08 noborder padding-5",
       placeholder: "Ex: Ligar para o dentista, comprar leite..."
     });
-    avulsa_create_box.append(avulsa_description_input);
+    avulsa_description_row.append(avulsa_description_input);
+
+    const avulsa_recurrence_row = calendarPickerFieldRow("/images/icon/refresh.png");
+    avulsa_create_box.append(avulsa_recurrence_row);
 
     const avulsa_recurrence_select = lib.element.create("select", {
-      class: "box b1 lucida-grande rem08 border padding-5 margin-bottom-5"
+      class: "mobile-box flex-1 lucida-grande rem08 noborder padding-5"
     });
-    avulsa_create_box.append(avulsa_recurrence_select);
+    avulsa_recurrence_row.append(avulsa_recurrence_select);
 
     avulsa_recurrence_select.append(lib.element.create("option", {
       value: "Unica"
@@ -1180,11 +1281,11 @@
 
     const avulsa_create_button = lib.element.create("button", {
       type: "button",
-      class: "box b1 btn-act lucida-grande bold noborder padding-8 pointer noselect"
-    }, "Criar e adicionar ao horário");
+      class: "box b1 btn-act lucida-grande bold noborder radius-5 padding-8 pointer noselect"
+    }, "+ Criar e adicionar ao horário");
     avulsa_create_box.append(avulsa_create_button);
 
-    avulsa_create_button.addEventListener("click", async () => {
+    const createAvulsaAndAdd = async () => {
       const description = avulsa_description_input.value.trim();
       if (!description) {
         return lib.message("Informe a descrição da tarefa avulsa.");
@@ -1208,35 +1309,46 @@
 
       await onRefresh();
       lib.message(response.done);
+    };
+
+    avulsa_create_button.addEventListener("click", createAvulsaAndAdd);
+    avulsa_description_input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        createAvulsaAndAdd();
+      }
     });
 
     if (available_avulsas.length) {
-      avulsa_list.append(lib.element.create("div", {
-        class: "calendar-picker-section-title lucida-grande rem08 bold padding-3 margin-bottom-5"
+      avulsa_panel.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem08 bold padding-3 margin-bottom-5"
       }, "Pendentes"));
 
+      const avulsa_list = lib.element.create("div", {
+        class: "box b1 container ground border radius-5 scroll-y-auto",
+        style: "max-height: 35vh;"
+      });
+      avulsa_panel.append(avulsa_list);
+
       available_avulsas.forEach(avulsa => {
-        const avulsa_button = lib.element.create("button", {
-          type: "button",
-          class: "calendar-picker-subtask lucida-grande rem08 border pointer ground padding-5 margin-top-5"
-        }, calendarAvulsaLabel(avulsa));
-        avulsa_list.append(avulsa_button);
+        const avulsa_button = calendarPickerItemRow({
+          text: avulsa.description,
+          show_repeat: calendarIsRecurringAvulsa(avulsa),
+          onClick: async event => {
+            event.stopPropagation();
 
-        avulsa_button.addEventListener("click", async event => {
-          event.stopPropagation();
+            const avulsa_id = calendarNormalizeId(avulsa.id);
+            const next_schedule = calendarAddAvulsaToSlot(current_schedule, date_key, time, avulsa_id);
+            current_schedule = next_schedule;
+            onScheduleChange(next_schedule);
+            slot_avulsa_ids.add(avulsa_id);
 
-          const avulsa_id = calendarNormalizeId(avulsa.id);
-          const next_schedule = calendarAddAvulsaToSlot(current_schedule, date_key, time, avulsa_id);
-          current_schedule = next_schedule;
-          onScheduleChange(next_schedule);
-          slot_avulsa_ids.add(avulsa_id);
+            calendarPickerMarkAdded(avulsa_button, avulsa.description);
 
-          avulsa_button.disabled = true;
-          avulsa_button.classList.add("opacity-out-06", "line-through");
-          avulsa_button.textContent = `${calendarAvulsaLabel(avulsa)} (adicionada)`;
-
-          await onRefresh();
+            await onRefresh();
+          }
         });
+        avulsa_list.append(avulsa_button);
       });
     }
 
