@@ -6,6 +6,7 @@ const User = function () {
   this.email;
   this.name;
   this.origin;
+  this.xp;
 
   this.create = () => {
     if (!this.email) { return { err: "É necessário informar o email" }; }
@@ -26,6 +27,11 @@ const User = function () {
 
     return db(query, values);
   };
+};
+
+User.addXp = (id, delta) => {
+  const query = `UPDATE cms_tasker.user SET xp = IFNULL(xp, 0) + ? WHERE id = ?;`;
+  return db(query, [delta, id]);
 };
 
 User.filter = ({ props, inners, params, strict_params, order_params }) => {

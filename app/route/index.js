@@ -44,7 +44,7 @@ router.get('/auth/google/callback', (req, res, next) => {
   })(req, res, next);
 });
 
-// router.use("/user", require("./user"));
+router.use("/user", require("./user"));
 router.use("/goal", require("./goal"));
 router.use("/milestone", require("./milestone"));
 router.use("/task", require("./task"));

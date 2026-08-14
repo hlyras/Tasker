@@ -78,6 +78,10 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', async function () {
+      if (typeof userLoadXp === "function") {
+        await userLoadXp();
+      }
+
       let goal_icon = document.getElementById("goal-icon");
       let milestone_icon = document.getElementById("milestone-icon");
       let task_icon = document.getElementById("task-icon");

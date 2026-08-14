@@ -276,7 +276,7 @@
     return calendarGetSlotItems(schedule, date_key, time)[calendarCompletedField(kind)].includes(id);
   }
 
-  function calendarToggleItemCompletedInSlot(schedule, date_key, time, kind, id) {
+  async function calendarToggleItemCompletedInSlot(schedule, date_key, time, kind, id) {
     id = calendarNormalizeId(id);
     const items = calendarGetSlotItems(schedule, date_key, time);
     const field = calendarSlotField(kind);
@@ -288,7 +288,153 @@
       items[completed_field].push(id);
     }
 
-    return calendarSetSlotItems(schedule, date_key, time, items);
+    const next_schedule = calendarSetSlotItems(schedule, date_key, time, items);
+    await calendarSyncOccurrenceXp(
+      date_key,
+      time,
+      kind,
+      id,
+      next_schedule && calendarIsItemCompletedInSlot(next_schedule, date_key, time, kind, id)
+    );
+    return next_schedule;
+  }
+
+  const CALENDAR_XP_COMPLETE = 20;
+  const CALENDAR_XP_LATE = -20;
+  const CALENDAR_XP_EVENTS_KEY = "tasker-calendar-xp-events";
+  const CALENDAR_XP_STARTED_KEY = "tasker-calendar-xp-started";
+
+  function calendarXpStartedAt() {
+    let started = parseInt(localStorage.getItem(CALENDAR_XP_STARTED_KEY), 10);
+    if (!started) {
+      started = Date.now();
+      localStorage.setItem(CALENDAR_XP_STARTED_KEY, String(started));
+    }
+    return started;
+  }
+
+  function calendarLoadXpEvents() {
+    const events = calendarLoadJson(CALENDAR_XP_EVENTS_KEY, {});
+    return events && typeof events === "object" ? events : {};
+  }
+
+  function calendarSaveXpEvents(events) {
+    localStorage.setItem(CALENDAR_XP_EVENTS_KEY, JSON.stringify(events));
+  }
+
+  function calendarXpEventKey(date_key, time, kind, id) {
+    return `${date_key}|${time}|${kind}|${calendarNormalizeId(id)}`;
+  }
+
+  function calendarSlotDateTime(date_key, time) {
+    const [year, month, day] = date_key.split("-").map(Number);
+    const [hour, minute] = time.split(":").map(Number);
+    return new Date(year, month - 1, day, hour, minute || 0, 0, 0);
+  }
+
+  function calendarSlotHasPassed(date_key, time) {
+    return Date.now() > calendarSlotDateTime(date_key, time).getTime();
+  }
+
+  async function calendarApplyXp(delta) {
+    if (!delta) { return false; }
+
+    if (typeof userApplyXpDelta === "function") {
+      userApplyXpDelta(delta);
+    }
+
+    if (typeof User === "undefined" || typeof User.addXp !== "function") {
+      return true;
+    }
+
+    const response = await API.response(User.addXp, { delta }, "none");
+    if (response && !response.skipped && typeof response.xp === "number") {
+      if (typeof userRenderXp === "function") {
+        userRenderXp(response.xp);
+      }
+    }
+
+    return true;
+  }
+
+  function calendarXpEventState(events, key) {
+    const value = events[key];
+    if (!value) { return { complete: false, late: false }; }
+    if (value === "complete") { return { complete: true, late: false }; }
+    if (value === "late") { return { complete: false, late: true }; }
+    return {
+      complete: Boolean(value.complete),
+      late: Boolean(value.late)
+    };
+  }
+
+  async function calendarSyncOccurrenceXp(date_key, time, kind, id, completed) {
+    const key = calendarXpEventKey(date_key, time, kind, id);
+    const events = calendarLoadXpEvents();
+    const state = calendarXpEventState(events, key);
+    let delta = 0;
+
+    if (completed) {
+      if (state.complete) { return; }
+      delta += CALENDAR_XP_COMPLETE;
+      state.complete = true;
+    } else if (state.complete) {
+      delta -= CALENDAR_XP_COMPLETE;
+      state.complete = false;
+    } else {
+      return;
+    }
+
+    if (!(await calendarApplyXp(delta))) { return; }
+
+    events[key] = state;
+    calendarSaveXpEvents(events);
+  }
+
+  async function calendarSettleLateXp() {
+    const schedule = calendarLoadSchedule();
+    const events = calendarLoadXpEvents();
+    const started = calendarXpStartedAt();
+    const now = Date.now();
+    let delta = 0;
+
+    Object.keys(schedule).forEach(date_key => {
+      const day_slots = schedule[date_key] || {};
+      Object.keys(day_slots).forEach(time => {
+        const slot_time = calendarSlotDateTime(date_key, time).getTime();
+        const items = calendarNormalizeSlot(day_slots[time]);
+
+        ["subtask", "session", "avulsa"].forEach(kind => {
+          const field = calendarSlotField(kind);
+          const completed_field = calendarCompletedField(kind);
+
+          items[field].forEach(id => {
+            const key = calendarXpEventKey(date_key, time, kind, id);
+            const state = calendarXpEventState(events, key);
+            const completed = items[completed_field].includes(id);
+
+            if (completed && !state.complete) {
+              state.complete = true;
+              delta += CALENDAR_XP_COMPLETE;
+              events[key] = state;
+              return;
+            }
+
+            if (completed || slot_time > now || slot_time < started || state.late) {
+              return;
+            }
+
+            state.late = true;
+            delta += CALENDAR_XP_LATE;
+            events[key] = state;
+          });
+        });
+      });
+    });
+
+    if (!delta) { return; }
+    if (!(await calendarApplyXp(delta))) { return; }
+    calendarSaveXpEvents(events);
   }
 
   function calendarAddSessionToSlot(schedule, date_key, time, session_id) {
@@ -1013,6 +1159,7 @@
 
     const render = async () => {
       const previous_scroll_top = body.scrollTop;
+      await calendarSettleLateXp();
 
       calendar_subtasks = await calendarGetCalendarSubtasks();
       pending_sessions = await calendarGetPendingSessions();
@@ -1145,7 +1292,15 @@
 
   async function calendarInitHome() {
     calendarGoToCurrentWeek();
+    calendarXpStartedAt();
+    await calendarSettleLateXp();
     await calendarRenderHomeDay(calendarTodayIndex());
+
+    if (!window._calendarXpTimer) {
+      window._calendarXpTimer = setInterval(() => {
+        if (!document.hidden) { calendarSettleLateXp(); }
+      }, 60000);
+    }
   }
 
   async function calendarPopup() {
@@ -1320,9 +1475,9 @@
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
 
-    done_icon.addEventListener("click", event => {
+    done_icon.addEventListener("click", async event => {
       event.stopPropagation();
-      const next_schedule = calendarToggleItemCompletedInSlot(
+      const next_schedule = await calendarToggleItemCompletedInSlot(
         getSchedule(),
         date_key,
         time,
@@ -1516,9 +1671,9 @@
       await workoutOpenEditPopup(session, onRefresh);
     });
 
-    done_icon.addEventListener("click", event => {
+    done_icon.addEventListener("click", async event => {
       event.stopPropagation();
-      const next_schedule = calendarToggleItemCompletedInSlot(
+      const next_schedule = await calendarToggleItemCompletedInSlot(
         getSchedule(),
         date_key,
         time,
@@ -1588,9 +1743,9 @@
       "14", "/images/icon/close-small.png");
     actions.append(remove_icon);
 
-    done_icon.addEventListener("click", event => {
+    done_icon.addEventListener("click", async event => {
       event.stopPropagation();
-      const next_schedule = calendarToggleItemCompletedInSlot(
+      const next_schedule = await calendarToggleItemCompletedInSlot(
         getSchedule(),
         date_key,
         time,

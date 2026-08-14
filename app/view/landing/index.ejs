@@ -29,7 +29,9 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', async function () {
-
+      if (typeof userLoadXp === "function") {
+        await userLoadXp();
+      }
     });
   </script>
 </footer>
