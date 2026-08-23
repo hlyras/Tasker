@@ -52,5 +52,6 @@ router.use("/subtask", require("./subtask"));
 router.use("/note", require("./note"));
 router.use("/workout", require("./workout"));
 router.use("/avulsa", require("./avulsa"));
+router.use("/calendar", require("./calendar"));
 
 module.exports = router;

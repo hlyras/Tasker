@@ -129,6 +129,7 @@
   function calendarSaveSchedule(schedule) {
     const cleaned = calendarCleanSchedule(schedule);
     localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(cleaned));
+    calendarQueuePersist();
     return cleaned;
   }
 
@@ -341,6 +342,7 @@
 
   function calendarSaveXpEvents(events) {
     localStorage.setItem(CALENDAR_XP_EVENTS_KEY, JSON.stringify(events));
+    calendarQueuePersist();
   }
 
   function calendarXpEventKey(date_key, time, kind, id) {
@@ -442,6 +444,7 @@
 
   function calendarSaveRepeats(repeats) {
     localStorage.setItem(CALENDAR_REPEATS_KEY, JSON.stringify(repeats));
+    calendarQueuePersist();
   }
 
   function calendarLoadSeededWeeks() {
@@ -451,7 +454,81 @@
 
   function calendarSaveSeededWeeks(seeded) {
     localStorage.setItem(CALENDAR_SEEDED_WEEKS_KEY, JSON.stringify(seeded));
+    calendarQueuePersist();
   }
+
+  let calendarPersistTimer = null;
+  let calendarHydratePromise = null;
+  let calendarCanPersist = false;
+
+  function calendarReadLocalState() {
+    return {
+      schedule: calendarLoadJson(CALENDAR_STORAGE_KEY, {}),
+      repeats: calendarLoadRepeats(),
+      seeded_weeks: calendarLoadSeededWeeks(),
+      xp_events: calendarLoadXpEvents()
+    };
+  }
+
+  function calendarWriteLocalState(state) {
+    localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(state.schedule || {}));
+    localStorage.setItem(CALENDAR_REPEATS_KEY, JSON.stringify(state.repeats || {}));
+    localStorage.setItem(CALENDAR_SEEDED_WEEKS_KEY, JSON.stringify(
+      Array.isArray(state.seeded_weeks) ? state.seeded_weeks : []
+    ));
+    localStorage.setItem(CALENDAR_XP_EVENTS_KEY, JSON.stringify(state.xp_events || {}));
+  }
+
+  async function calendarPersistState() {
+    if (!calendarCanPersist) { return; }
+    if (typeof Calendar === "undefined" || typeof Calendar.save !== "function") { return; }
+
+    await API.response(Calendar.save, calendarReadLocalState(), "none");
+  }
+
+  function calendarQueuePersist() {
+    if (!calendarCanPersist) { return; }
+    clearTimeout(calendarPersistTimer);
+    calendarPersistTimer = setTimeout(() => {
+      calendarPersistState();
+    }, 250);
+  }
+
+  async function calendarHydrateFromServer() {
+    if (typeof Calendar === "undefined" || typeof Calendar.find !== "function") {
+      calendarCanPersist = true;
+      return;
+    }
+
+    const response = await API.response(Calendar.find, {}, "none");
+    if (!response || response.skipped) {
+      calendarCanPersist = true;
+      return;
+    }
+
+    if (response.found) {
+      calendarWriteLocalState(response);
+      calendarCanPersist = true;
+      return;
+    }
+
+    calendarCanPersist = true;
+    await calendarPersistState();
+  }
+
+  function calendarEnsureHydrated() {
+    if (!calendarHydratePromise) {
+      calendarHydratePromise = calendarHydrateFromServer();
+    }
+    return calendarHydratePromise;
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearTimeout(calendarPersistTimer);
+      calendarPersistState();
+    }
+  });
 
   function calendarRepeatKey(kind, id) {
     return `${kind}:${calendarNormalizeId(id)}`;
@@ -1311,6 +1388,7 @@
   }
 
   async function calendarInitHome() {
+    await calendarEnsureHydrated();
     calendarGoToCurrentWeek();
     await calendarRenderHomeDay(calendarTodayIndex());
   }
@@ -1352,6 +1430,7 @@
       });
     };
 
+    await calendarEnsureHydrated();
     await renderWeek();
 
     return popup;
