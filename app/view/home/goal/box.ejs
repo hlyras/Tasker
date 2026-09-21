@@ -219,9 +219,9 @@
 
     lib.drag.element(goal_div, async () => {
       await updateGoalOrder(goal_box);
-    }, move_icon, "v");
+    }, move_icon, "g");
 
-    lib.drag.drop(goal_div, null, "drag-over", "v");
+    lib.drag.drop(goal_div, null, "drag-over", "g");
 
     let goal_text = lib.element.create("textarea", {
       class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",

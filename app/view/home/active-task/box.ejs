@@ -17,7 +17,8 @@
 
     let active_tasks = await taskFilter({
       status: 'Em execução'
-    });
+    }) || [];
+    active_tasks.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
 
     if (!active_tasks.length) {
       active_task_box.append(lib.element.create("div", {
@@ -36,8 +37,10 @@
 
   function activeTaskDiv(active_task, milestones) {
     let active_task_div = lib.element.create("div", {
-      class: "box b2-3 container ground border shadow-st padding-5 margin-top-5"
+      class: "box b2-3 container ground border shadow-st padding-5 margin-top-5 sortable-item"
     });
+
+    active_task_div.id = `task-${active_task.id}`;
 
     let option_div = lib.element.create("div", {
       class: "container b1 right padding-3"
@@ -45,7 +48,7 @@
     active_task_div.append(option_div);
 
     let milestone_select = lib.element.create("select", {
-      class: "milestone-select mobile-box b7-10 lucida-grande rem08 border padding-3 v-center"
+      class: "milestone-select mobile-box b6-10 lucida-grande rem08 border padding-3 v-center"
     });
     option_div.append(milestone_select);
 
@@ -75,6 +78,21 @@
       "20", "/images/icon/done.png");
     option_div.append(done_icon);
 
+    let move_icon = typeof taskMoveIcon === "function"
+      ? taskMoveIcon()
+      : lib.element.svg("b10 opacity-out-08 v-center grab", "18",
+        `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+      );
+    option_div.append(move_icon);
+
+    let active_task_box = document.getElementById("active-task-box");
+
+    lib.drag.element(active_task_div, async () => {
+      await updateTaskOrder(active_task_box);
+    }, move_icon, "v");
+
+    lib.drag.drop(active_task_div, null, "drag-over", "v");
+
     let active_task_text = lib.element.create("textarea", {
       class: "mobile-box b1 height-100 lucida-grande rem08 border padding-3 v-center nofocus",
       'data-initial_value': active_task.description
@@ -94,8 +112,9 @@
         let response = await API.response(Task.update, updated_task);
         if (!response.done) { return; }
 
-        lib.message(response.done, () => {
+        lib.message(response.done, async () => {
           active_task_div.remove();
+          await updateTaskOrder(document.getElementById("active-task-box"));
         });
       });
     });
@@ -133,7 +152,8 @@
 
         let updated_task = {
           id: active_task.id,
-          status: "Pendente"
+          status: "Pendente",
+          sort_order: await nextTaskSortOrder("Pendente")
         };
 
         let response = await API.response(Task.update, updated_task);
@@ -144,8 +164,10 @@
         active_task.status = "Pendente";
 
         active_task_div.remove();
+        await updateTaskOrder(active_task_box);
 
-        if (!active_task_box.children.length) {
+        if (!active_task_box.querySelector("[id^='task-']")) {
+          active_task_box.innerHTML = "";
           active_task_box.append(lib.element.create("div", {
             class: "box b1 lucida-grande bold padding-20 center"
           }, "Nenhuma tarefa"));
@@ -174,8 +196,9 @@
         if (r) { return; }
 
         let response = await API.response(Task.delete, active_task.id);
-        lib.message(response, () => {
+        lib.message(response, async () => {
           active_task_div.remove();
+          await updateTaskOrder(document.getElementById("active-task-box"));
         });
       }, "Não excluir", "Excluir tarefa");
     });

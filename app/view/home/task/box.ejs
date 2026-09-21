@@ -70,8 +70,8 @@
 
     let tasks = await taskFilter({
       status: task_status_select.value
-    });
-    tasks = lib.sort(tasks, "datetime", "desc");
+    }) || [];
+    tasks.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
 
     if (!tasks.length) {
       task_box.append(lib.element.create("div", {
@@ -88,10 +88,42 @@
     });
   };
 
+  async function nextTaskSortOrder(status) {
+    const tasks = await taskFilter({ status });
+    if (!tasks || !tasks.length) { return 1; }
+
+    return tasks.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
+  }
+
+  async function updateTaskOrder(container) {
+    if (!container) { return; }
+
+    let order = 1;
+
+    for (const item of container.children) {
+      if (!item.id || !String(item.id).startsWith("task-")) { continue; }
+
+      await API.response(Task.update, {
+        id: item.id.replace("task-", ""),
+        sort_order: order
+      }, "none");
+
+      order++;
+    }
+  }
+
+  function taskMoveIcon() {
+    return lib.element.svg("b10 opacity-out-08 v-center grab", "18",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+  }
+
   function taskDiv(task, milestones) {
     let task_div = lib.element.create("div", {
-      class: "mobile-box b2 container ground border shadow-st margin-top-10 padding-3",
+      class: "mobile-box b2 container ground border shadow-st margin-top-10 padding-3 sortable-item",
     });
+
+    task_div.id = `task-${task.id}`;
 
     let option_div = lib.element.create("div", {
       class: "container b1 right padding-3"
@@ -99,7 +131,7 @@
     task_div.append(option_div);
 
     let milestone_select = lib.element.create("select", {
-      class: "milestone-select mobile-box b7-10 lucida-grande rem08 border padding-3 v-center"
+      class: "milestone-select mobile-box b6-10 lucida-grande rem08 border padding-3 v-center"
     });
     option_div.append(milestone_select);
 
@@ -135,6 +167,15 @@
       "20", "/images/icon/done.png");
     option_div.append(done_icon);
 
+    let move_icon = taskMoveIcon();
+    option_div.append(move_icon);
+
+    lib.drag.element(task_div, async () => {
+      await updateTaskOrder(task_box);
+    }, move_icon, "g");
+
+    lib.drag.drop(task_div, null, "drag-over", "g");
+
     done_icon.addEventListener("click", async () => {
       lib.confirm("Deseja concluir a tarefa?", async r => {
         if (!r) { return; }
@@ -147,8 +188,9 @@
         let response = await API.response(Task.update, updated_task);
         if (!response.done) { return; }
 
-        lib.message(response.done, () => {
+        lib.message(response.done, async () => {
           task_div.remove();
+          await updateTaskOrder(task_box);
         });
       });
     });
@@ -179,7 +221,8 @@
 
         let updated_task = {
           id: task.id,
-          status: "Em execução"
+          status: "Em execução",
+          sort_order: await nextTaskSortOrder("Em execução")
         };
 
         let response = await API.response(Task.update, updated_task);
@@ -188,6 +231,11 @@
         let active_task_box = document.getElementById("active-task-box");
 
         task.status = "Em execução";
+        task.sort_order = updated_task.sort_order;
+
+        [...active_task_box.children].forEach(child => {
+          if (!child.id) { child.remove(); }
+        });
 
         let active_task_div = activeTaskDiv({
           ...task,
@@ -195,6 +243,7 @@
 
         active_task_box.append(active_task_div);
         task_div.remove();
+        await updateTaskOrder(task_box);
       });
     });
 
@@ -215,8 +264,9 @@
         if (r) { return; }
 
         let response = await API.response(Task.delete, task.id);
-        lib.message(response, () => {
+        lib.message(response, async () => {
           task_div.remove();
+          await updateTaskOrder(task_box);
         });
       }, "Não excluir", "Excluir tarefa");
     });

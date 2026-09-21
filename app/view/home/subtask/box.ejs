@@ -4,21 +4,44 @@
       class: "box b1 container margin-top-5 padding-5 border-top"
     });
 
-    let title = lib.element.create("div", {
-      class: "box b1 lucida-grande bold rem08 margin-bottom-5"
-    }, "Subtarefas");
-    section.append(title);
+    let title_row = lib.element.create("div", {
+      class: "box b1 container pointer"
+    });
+    section.append(title_row);
+
+    title_row.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem08 padding-5 v-center"
+    }, "Subtarefas"));
+
+    let toggle_icon = lib.element.icon("opacity-out-08 pointer v-center",
+      "16", "/images/icon/down-arrow.png");
+    title_row.append(toggle_icon);
+
+    let content = lib.element.create("div", {
+      class: "box b1 display-none"
+    });
+    section.append(content);
 
     let container = lib.element.create("div", {
       id: `subtask-container-${task.id}`,
       class: "box b1 container subtask-container"
     });
-    section.append(container);
+    content.append(container);
 
     let add_row = lib.element.create("div", {
       class: "box b1 container margin-top-5"
     });
-    section.append(add_row);
+    content.append(add_row);
+
+    title_row.addEventListener("click", () => {
+      const is_open = !content.classList.contains("display-none");
+      content.classList.toggle("display-none", is_open);
+
+      const img = toggle_icon.querySelector("img");
+      if (img) {
+        img.src = is_open ? "/images/icon/down-arrow.png" : "/images/icon/up-arrow.png";
+      }
+    });
 
     let add_input = lib.element.create("textarea", {
       class: "mobile-box b4-5 lucida-grande rem08 border padding-5 wrap",

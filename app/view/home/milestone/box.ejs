@@ -247,9 +247,9 @@
 
     lib.drag.element(milestone_div, async () => {
       await updateMilestoneOrder(milestone_box);
-    }, move_icon, "v");
+    }, move_icon, "g");
 
-    lib.drag.drop(milestone_div, null, "drag-over", "v");
+    lib.drag.drop(milestone_div, null, "drag-over", "g");
 
     let milestone_text = lib.element.create("textarea", {
       class: "mobile-box a1 lucida-grande rem08 border padding-3 v-center wrap",

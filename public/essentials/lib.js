@@ -786,6 +786,18 @@ lib.roundValue = (value) => {
   return Math.round((value) * 100) / 100;
 };
 
+lib.formatPrice = (value) => {
+  if (value === "A combinar") return value;
+  const num = parseFloat(value);
+  if (isNaN(num)) return "0,00";
+  return num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+lib.formatCurrency = (value) => {
+  if (value === "A combinar") return value;
+  return `R$${lib.formatPrice(value)}`;
+};
+
 // -------------------
 // DOM manipulation
 // -------------------
@@ -943,6 +955,19 @@ lib.format.phone = (value) => {
   }
 
   return phone;
+};
+
+lib.format.cpfCnpj = (value) => {
+  let input = { value: String(value || "") };
+  let digits = input.value.replace(/\D/g, "");
+  if (digits.length > 11) { lib.mask.cnpj(input); }
+  else { lib.mask.cpf(input); }
+  return input.value;
+};
+
+lib.phoneDigits = (value) => {
+  if (value == null || value === "") return value;
+  return String(value).replace(/\D/g, "");
 };
 
 lib.mask.cnpj = (input) => {
@@ -1346,8 +1371,8 @@ lib.carousel.navigation = (box, response, pagination) => {
 lib.carousel.generic = (items, parentElement, cb) => {
   var isDown = false;
   var isDragging = false;
-  var startX;
-  var startY;
+  var startPageX;
+  var startPageY;
   var scrollLeft;
 
   items.forEach(item => {
@@ -1358,10 +1383,27 @@ lib.carousel.generic = (items, parentElement, cb) => {
     });
   });
 
+  // After a drag, suppress click on children (e.g. image zoom / links) when mouseup lands on the same element
+  parentElement.addEventListener('click', function (e) {
+    if (isDragging) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
+  // Prevent native link/image drag ghost from stealing the carousel drag
+  parentElement.addEventListener('dragstart', function (e) {
+    e.preventDefault();
+  });
+
   parentElement.addEventListener('mousedown', function (e) {
     isDown = true;
-    startX = e.pageX - parentElement.offsetLeft;
+    startPageX = e.pageX;
     scrollLeft = parentElement.scrollLeft;
+
+    if (e.target.closest('a, img')) {
+      e.preventDefault();
+    }
   });
 
   parentElement.addEventListener('mouseleave', function () {
@@ -1377,16 +1419,15 @@ lib.carousel.generic = (items, parentElement, cb) => {
     if (!isDown) return;
     isDragging = true;
     e.preventDefault();
-    var x = e.pageX - parentElement.offsetLeft;
-    var walk = (x - startX) * 2; // Ajuste a sensibilidade do scroll horizontal conforme necessário
+    var walk = (e.pageX - startPageX) * 2;
     parentElement.scrollLeft = scrollLeft - walk;
   });
 
   // Para detecção de toque em dispositivos móveis
   parentElement.addEventListener('touchstart', function (e) {
     isDown = true;
-    startX = e.touches[0].pageX - parentElement.offsetLeft;
-    startY = e.touches[0].pageY - parentElement.offsetTop;
+    startPageX = e.touches[0].pageX;
+    startPageY = e.touches[0].pageY;
     scrollLeft = parentElement.scrollLeft;
     scrollTop = parentElement.scrollTop;
   });
@@ -1398,16 +1439,15 @@ lib.carousel.generic = (items, parentElement, cb) => {
 
   items.length > 1 && parentElement.addEventListener('touchmove', function (e) {
     if (!isDown) return;
-    var x = e.touches[0].pageX - parentElement.offsetLeft;
-    var y = e.touches[0].pageY - parentElement.offsetTop;
-    var walkX = (x - startX) * 2; // Ajuste a sensibilidade do scroll horizontal conforme necessário
-    var walkY = (y - startY) * 2; // Ajuste a sensibilidade do scroll vertical conforme necessário
+    var walkX = (e.touches[0].pageX - startPageX) * 2;
+    var walkY = (e.touches[0].pageY - startPageY) * 2;
 
     if (Math.abs(walkY) > Math.abs(walkX)) {
       // Movimento vertical maior que o horizontal, permite a rolagem vertical
       return;
     }
 
+    isDragging = true;
     e.preventDefault(); // Impede a rolagem da página
 
     parentElement.scrollLeft = scrollLeft - walkX;
@@ -1517,6 +1557,14 @@ lib.removeChar = (string, regex) => {
 lib.replaceChar = (string, regex, content) => {
   string = string.replaceAll(regex, content);
   return string;
+};
+
+lib.stripAccents = (string) => {
+  return String(string).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+};
+
+lib.categorySlug = (name) => {
+  return lib.stripAccents(String(name).trim()).replace(/\s+/g, '-');
 };
 
 lib.hasForbiddenChar = (url) => {
@@ -1905,9 +1953,30 @@ lib.localStorage.remove = (item) => {
 
 lib.image = {};
 
-lib.image.zoom = (image_src, cb) => {
+lib.image.zoom = (image_src, cb, gallery_images, gallery_index) => {
   const focused_btn = document.querySelector(':focus');
   focused_btn && focused_btn.blur();
+
+  function getGalleryImageSrc(item) {
+    if (!item) return "";
+    if (typeof item === "string") return item;
+    return item.url || item.src || "";
+  }
+
+  let galleryImages = Array.isArray(gallery_images) && gallery_images.length > 1 ? gallery_images : null;
+  let galleryIndex = 0;
+
+  if (galleryImages) {
+    if (typeof gallery_index === "number" && gallery_index >= 0 && gallery_index < galleryImages.length) {
+      galleryIndex = gallery_index;
+    } else {
+      let found = galleryImages.findIndex(item => {
+        let url = getGalleryImageSrc(item);
+        return url && image_src && (url === image_src || image_src.endsWith(url) || url.endsWith(image_src));
+      });
+      galleryIndex = found >= 0 ? found : 0;
+    }
+  }
 
   const msg_div = lib.element.create("div", {
     class: "msg h-center",
@@ -1942,7 +2011,7 @@ lib.image.zoom = (image_src, cb) => {
 
   let image_box = lib.element.create("div", {
     class: "ground radius-2 max-height-500 scroll-hide scroll-line center",
-    style: "user-select: none; -moz-user-select: none; -webkit-user-drag: none; -webkit-user-select: none; -ms-user-select: none;"
+    style: "user-select: none; -moz-user-select: none; -webkit-user-drag: none; -webkit-user-select: none; -ms-user-select: none; touch-action: none;"
   });
   msg_popup.append(image_box);
 
@@ -1952,6 +2021,47 @@ lib.image.zoom = (image_src, cb) => {
     style: "display:block; user-select: none; -moz-user-select: none; -webkit-user-drag: none; -webkit-user-select: none; -ms-user-select: none;"
   });
   image_box.append(image);
+
+  let leftButton;
+  let rightButton;
+
+  if (galleryImages) {
+    leftButton = lib.element.create("div", {
+      class: "opacity-08 noselect carousel-btn",
+      style: "position: absolute; top: 50%; left: 8px; transform: translateY(-50%); z-index: 12; -webkit-tap-highlight-color: transparent; outline: none;"
+    });
+    msg_popup.append(leftButton);
+
+    let leftIcon = lib.element.create("div", {
+      class: "ground border size-20 radius-50 padding-1 pointer noselect",
+      style: "-webkit-tap-highlight-color: transparent;"
+    });
+    leftButton.append(leftIcon);
+
+    leftIcon.append(lib.element.create("img", {
+      class: "size-20 opacity-06",
+      src: "/images/icon/left-arrow.png",
+      style: "-webkit-tap-highlight-color: transparent;"
+    }));
+
+    rightButton = lib.element.create("div", {
+      class: "opacity-08 noselect carousel-btn",
+      style: "position: absolute; top: 50%; right: 8px; transform: translateY(-50%); z-index: 12; -webkit-tap-highlight-color: transparent; outline: none;"
+    });
+    msg_popup.append(rightButton);
+
+    let rightIcon = lib.element.create("div", {
+      class: "ground border size-20 radius-50 padding-1 pointer noselect",
+      style: "-webkit-tap-highlight-color: transparent;"
+    });
+    rightButton.append(rightIcon);
+
+    rightIcon.append(lib.element.create("img", {
+      class: "size-20 opacity-06",
+      src: "/images/icon/right-arrow.png",
+      style: "-webkit-tap-highlight-color: transparent;"
+    }));
+  }
 
   let popupId = lib.string.gen(5);
 
@@ -1993,12 +2103,23 @@ lib.image.zoom = (image_src, cb) => {
   msg_div._popupEsc = esc;
 
   function keydown(e) {
-    if (e.keyCode != 27) return;
-
     let top = lib.historyStack[lib.historyStack.length - 1];
     if (!top || top.esc !== esc) return;
 
-    esc();
+    if (e.keyCode == 27) {
+      esc();
+      return;
+    }
+
+    if (!galleryImages) return;
+
+    if (e.keyCode == 37) {
+      e.preventDefault();
+      goToGalleryImage(galleryIndex - 1);
+    } else if (e.keyCode == 39) {
+      e.preventDefault();
+      goToGalleryImage(galleryIndex + 1);
+    }
   }
 
   lib.pushStateToStack({ popupId: popupId }, esc);
@@ -2010,6 +2131,7 @@ lib.image.zoom = (image_src, cb) => {
 
   let isDown = false;
   let isDragging = false;
+  let isPinching = false;
   let startX;
   let startY;
   let scrollLeft;
@@ -2018,43 +2140,224 @@ lib.image.zoom = (image_src, cb) => {
   let zoom_status = "off";
   let initial_height;
   let initial_width;
+  let currentScale = 1;
+  let pinchStartDistance = 0;
+  let pinchStartScale = 1;
+  const MAX_SCALE = 2.5;
+
+  function getPanFactor() {
+    return Math.max(0.35, 2 / currentScale);
+  }
+
+  function getPinchZoomScale(startScale, distanceRatio) {
+    let sensitivity = Math.max(0.5, 1.28 - startScale * 0.18);
+    return startScale * (1 + (distanceRatio - 1) * sensitivity);
+  }
+
+  function captureInitialSize() {
+    if (!initial_height || !initial_width) {
+      let rect = image.getBoundingClientRect();
+      initial_width = rect.width;
+      initial_height = rect.height;
+    }
+  }
+
+  function enableZoomMode() {
+    lib.removeCss(image_box, ["scroll-hide"]);
+    lib.addCss(image_box, ["scroll-y", "scroll-x"]);
+    lib.removeCss(image, ["image-prop", "max-height-500", "zoom-in", "center"]);
+    lib.addCss(image, ["grab"]);
+  }
+
+  function clampScroll(scale) {
+    let maxScrollLeft = Math.max(0, initial_width * scale - image_box.clientWidth);
+    let maxScrollTop = Math.max(0, initial_height * scale - image_box.clientHeight);
+    image_box.scrollLeft = Math.max(0, Math.min(maxScrollLeft, image_box.scrollLeft));
+    image_box.scrollTop = Math.max(0, Math.min(maxScrollTop, image_box.scrollTop));
+  }
+
+  function getImageFocal(clientX, clientY) {
+    captureInitialSize();
+    let imageRect = image.getBoundingClientRect();
+    return {
+      x: ((clientX - imageRect.left) / imageRect.width) * initial_width,
+      y: ((clientY - imageRect.top) / imageRect.height) * initial_height
+    };
+  }
+
+  function applyZoomCentering(scale) {
+    let imageBoxWidth = image_box.clientWidth;
+    let imageBoxHeight = image_box.clientHeight;
+    let scaledWidth = initial_width * scale;
+    let scaledHeight = initial_height * scale;
+    let maxScrollLeft = Math.max(0, scaledWidth - imageBoxWidth);
+    let maxScrollTop = Math.max(0, scaledHeight - imageBoxHeight);
+    let marginLeft = maxScrollLeft === 0 ? Math.max(0, (imageBoxWidth - scaledWidth) / 2) : 0;
+    let marginTop = maxScrollTop === 0 ? Math.max(0, (imageBoxHeight - scaledHeight) / 2) : 0;
+
+    image.style.margin = `${marginTop}px ${marginLeft}px`;
+
+    return { imageBoxWidth, imageBoxHeight, maxScrollLeft, maxScrollTop };
+  }
+
+  function setScrollFromFocal(focalX, focalY, scale) {
+    let { imageBoxWidth, imageBoxHeight, maxScrollLeft, maxScrollTop } = applyZoomCentering(scale);
+
+    if (maxScrollLeft === 0 && maxScrollTop === 0) {
+      image_box.scrollLeft = 0;
+      image_box.scrollTop = 0;
+      return;
+    }
+
+    image_box.scrollLeft = maxScrollLeft === 0 ? 0 : focalX * scale - imageBoxWidth / 2;
+    image_box.scrollTop = maxScrollTop === 0 ? 0 : focalY * scale - imageBoxHeight / 2;
+    clampScroll(scale);
+  }
+
+  function prepareForScrollZoom() {
+    if (zoom_status !== "off") return;
+
+    let offsetX = image.offsetLeft;
+    let offsetY = image.offsetTop;
+
+    lib.removeCss(image, ["center"]);
+    image.style.margin = "0";
+    lib.removeCss(image_box, ["scroll-hide"]);
+    lib.addCss(image_box, ["scroll-y", "scroll-x"]);
+
+    image_box.scrollLeft = offsetX;
+    image_box.scrollTop = offsetY;
+  }
+
+  function setZoomOff() {
+    captureInitialSize();
+    image.height = initial_height;
+    image.width = initial_width;
+    image.style.margin = "";
+    currentScale = 1;
+    zoom_status = "off";
+    image_box.scrollLeft = 0;
+    image_box.scrollTop = 0;
+    lib.removeCss(image_box, ["scroll-y", "scroll-x"]);
+    lib.addCss(image_box, ["scroll-hide"]);
+    lib.addCss(image, ["image-prop", "max-height-500", "zoom-in", "center"]);
+    lib.removeCss(image, ["grab"]);
+  }
+
+  function updateZoomArrows() {
+    if (!galleryImages || !leftButton || !rightButton) return;
+    lib.display(leftButton, galleryIndex <= 0 ? "none" : "");
+    lib.display(rightButton, galleryIndex >= galleryImages.length - 1 ? "none" : "");
+  }
+
+  function goToGalleryImage(nextIndex) {
+    if (!galleryImages || nextIndex < 0 || nextIndex >= galleryImages.length || nextIndex === galleryIndex) return;
+
+    galleryIndex = nextIndex;
+    image.removeAttribute("height");
+    image.removeAttribute("width");
+    image.style.height = "";
+    image.style.width = "";
+    image.style.margin = "";
+    initial_height = 0;
+    initial_width = 0;
+    currentScale = 1;
+    zoom_status = "off";
+    isDown = false;
+    isDragging = false;
+    isPinching = false;
+    image_box.scrollLeft = 0;
+    image_box.scrollTop = 0;
+    lib.removeCss(image_box, ["scroll-y", "scroll-x"]);
+    lib.addCss(image_box, ["scroll-hide"]);
+    lib.addCss(image, ["image-prop", "max-height-500", "zoom-in", "center"]);
+    lib.removeCss(image, ["grab"]);
+    image.src = getGalleryImageSrc(galleryImages[galleryIndex]);
+    updateZoomArrows();
+  }
+
+  function setZoomOn(focalX, focalY, scale) {
+    captureInitialSize();
+    scale = scale || MAX_SCALE;
+
+    image.height = initial_height * scale;
+    image.width = initial_width * scale;
+    currentScale = scale;
+    zoom_status = "on";
+    enableZoomMode();
+
+    if (focalX != null && focalY != null) {
+      setScrollFromFocal(focalX, focalY, scale);
+    }
+  }
+
+  function getTouchDistance(touches) {
+    let dx = touches[0].clientX - touches[1].clientX;
+    let dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function getTouchCenter(touches) {
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2
+    };
+  }
+
+  function applyPinchZoom(scale, centerX, centerY) {
+    captureInitialSize();
+    scale = Math.min(Math.max(scale, 1), MAX_SCALE);
+
+    if (scale <= 1.05) {
+      setZoomOff();
+      return;
+    }
+
+    if (zoom_status === "off") {
+      prepareForScrollZoom();
+    }
+
+    let boxRect = image_box.getBoundingClientRect();
+    let originX = (image_box.scrollLeft + centerX - boxRect.left) / currentScale;
+    let originY = (image_box.scrollTop + centerY - boxRect.top) / currentScale;
+
+    image.width = initial_width * scale;
+    image.height = initial_height * scale;
+    currentScale = scale;
+    zoom_status = "on";
+    enableZoomMode();
+
+    let targetScrollLeft = originX * scale - (centerX - boxRect.left);
+    let targetScrollTop = originY * scale - (centerY - boxRect.top);
+
+    if (scale >= 2.5) {
+      let damp = Math.max(0.3, 1.25 / scale);
+      targetScrollLeft = image_box.scrollLeft + (targetScrollLeft - image_box.scrollLeft) * damp;
+      targetScrollTop = image_box.scrollTop + (targetScrollTop - image_box.scrollTop) * damp;
+    }
+
+    let { maxScrollLeft, maxScrollTop } = applyZoomCentering(scale);
+
+    if (maxScrollLeft === 0 && maxScrollTop === 0) {
+      image_box.scrollLeft = 0;
+      image_box.scrollTop = 0;
+      return;
+    }
+
+    image_box.scrollLeft = maxScrollLeft === 0 ? 0 : targetScrollLeft;
+    image_box.scrollTop = maxScrollTop === 0 ? 0 : targetScrollTop;
+    clampScroll(scale);
+  }
 
   image.addEventListener("click", async (e) => {
-    initial_height = initial_height || image.height;
-    initial_width = initial_width || image.width;
+    captureInitialSize();
 
-    if (!isDragging) {
-      let rect = image.getBoundingClientRect();
-      let clickX = e.pageX - rect.left + window.scrollX;
-      let clickY = e.pageY - rect.top - window.scrollY;
-
+    if (!isDragging && !isPinching) {
       if (zoom_status == "on") {
-        image.height = initial_height;
-        image.width = initial_width;
-        lib.removeCss(image_box, ["scroll-y", "scroll-x"]);
-        lib.addCss(image_box, ["scroll-hide"]);
-        lib.addCss(image, ["image-prop", "max-height-500", "zoom-in"]);
-        lib.removeCss(image, ["grab"]);
+        setZoomOff();
+      } else {
+        setZoomOn(initial_width / 2, initial_height / 2, MAX_SCALE);
       }
-
-      if (zoom_status == "off") {
-        image.height = parseInt(initial_height) * 2;
-        image.width = parseInt(initial_width) * 2;
-        lib.removeCss(image_box, ["scroll-hide"]);
-        lib.addCss(image_box, ["scroll-y", "scroll-x"]);
-        lib.removeCss(image, ["image-prop", "max-height-500", "zoom-in"]);
-        lib.addCss(image, ["grab"]);
-      }
-
-      let imageBoxWidth = image_box.clientWidth;
-      let imageBoxHeight = image_box.clientHeight;
-      let newScrollLeft = (clickX * 2) - imageBoxWidth / 2;
-      let newScrollTop = (clickY * 2) - imageBoxHeight / 2;
-
-      image_box.scrollLeft = newScrollLeft;
-      image_box.scrollTop = newScrollTop;
-
-      zoom_status = zoom_status == "on" ? "off" : "on";
     }
   });
 
@@ -2083,12 +2386,90 @@ lib.image.zoom = (image_src, cb) => {
 
     let x = e.pageX - image_box.offsetLeft;
     let y = e.pageY - image_box.offsetTop;
-    let walkX = (x - startX) * 2;
-    let walkY = (y - startY) * 2;
+    let panFactor = getPanFactor();
+    let walkX = (x - startX) * panFactor;
+    let walkY = (y - startY) * panFactor;
 
     image_box.scrollLeft = scrollLeft - walkX;
     image_box.scrollTop = scrollTop - walkY;
   });
+
+  image_box.addEventListener("touchstart", function (e) {
+    if (e.touches.length === 2) {
+      isPinching = true;
+      isDown = false;
+      captureInitialSize();
+      if (zoom_status === "off") {
+        prepareForScrollZoom();
+      }
+      pinchStartDistance = getTouchDistance(e.touches);
+      pinchStartScale = currentScale;
+      return;
+    }
+
+    if (e.touches.length === 1 && zoom_status === "on") {
+      isDown = true;
+      startX = e.touches[0].pageX - image_box.offsetLeft;
+      startY = e.touches[0].pageY - image_box.offsetTop;
+      scrollLeft = image_box.scrollLeft;
+      scrollTop = image_box.scrollTop;
+    }
+  }, { passive: true });
+
+  image_box.addEventListener("touchmove", function (e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      isPinching = true;
+      let center = getTouchCenter(e.touches);
+      let distance = getTouchDistance(e.touches);
+      let ratio = distance / pinchStartDistance;
+      let scale = getPinchZoomScale(pinchStartScale, ratio);
+      applyPinchZoom(scale, center.x, center.y);
+      return;
+    }
+
+    if (!isDown || zoom_status !== "on") return;
+    isDragging = true;
+    e.preventDefault();
+
+    let x = e.touches[0].pageX - image_box.offsetLeft;
+    let y = e.touches[0].pageY - image_box.offsetTop;
+    let panFactor = getPanFactor();
+    let walkX = (x - startX) * panFactor;
+    let walkY = (y - startY) * panFactor;
+
+    image_box.scrollLeft = scrollLeft - walkX;
+    image_box.scrollTop = scrollTop - walkY;
+  }, { passive: false });
+
+  image_box.addEventListener("touchend", function () {
+    setTimeout(function () {
+      isDragging = false;
+      isPinching = false;
+    }, 50);
+    isDown = false;
+  });
+
+  if (galleryImages) {
+    updateZoomArrows();
+
+    leftButton.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      goToGalleryImage(galleryIndex - 1);
+    });
+
+    rightButton.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      goToGalleryImage(galleryIndex + 1);
+    });
+
+    [leftButton, rightButton].forEach(button => {
+      button.addEventListener("mousedown", e => e.stopPropagation());
+      button.addEventListener("touchstart", e => e.stopPropagation(), { passive: true });
+    });
+  }
 };
 
 lib.image.drag = (images, parentElement, cb) => {
@@ -2098,7 +2479,7 @@ lib.image.drag = (images, parentElement, cb) => {
   let startY;
   let scrollLeft;
 
-  images.forEach(function (image) {
+  images.forEach(function (image, index) {
     let image_box = lib.element.create("div", {
       class: 'box ground border radius-5 margin-right-5',
       style: images.length > 1 ?
@@ -2133,7 +2514,7 @@ lib.image.drag = (images, parentElement, cb) => {
     image_box.append(image_div);
 
     cb && image_div.addEventListener("click", () => {
-      if (!isDragging) { cb(image_div.src); }
+      if (!isDragging) { cb(image.url || image_div.src, undefined, images, index); }
     });
   });
 
@@ -2280,7 +2661,7 @@ lib.image.carousel = (images, parentElement, cb) => {
     });
   }
 
-  images.forEach(function (image) {
+  images.forEach(function (image, index) {
     let image_box = lib.element.create("div", {
       class: 'box ground',
       style: images.length > 1 ?
@@ -2315,7 +2696,7 @@ lib.image.carousel = (images, parentElement, cb) => {
     image_box.append(image_div);
 
     cb && image_div.addEventListener("click", () => {
-      cb(image_div.src);
+      cb(image.url || image_div.src, undefined, images, index);
     });
   });
 };
@@ -2569,72 +2950,433 @@ lib.element.scaleDown = (target, { minWidth, minHeight, speed }, cb) => {
 // drag and drop
 lib.drag = {};
 
-lib.drag.element = (element, cb, handle = element, dir = "v") => {
-  element.setAttribute("draggable", true);
+lib.drag.resolveHorizontalSiblingGap = (parent, element, placeholder) => {
+  if (!parent) return "0px";
 
-  let dragAllowed = false;
+  const siblings = [...parent.children].filter(child =>
+    child !== placeholder &&
+    child !== element &&
+    !child.classList.contains("drag-floating") &&
+    !child.classList.contains("drag-placeholder")
+  );
+
+  for (const sibling of siblings) {
+    const marginLeft = parseFloat(window.getComputedStyle(sibling).marginLeft);
+    if (marginLeft > 0) {
+      return `${marginLeft}px`;
+    }
+  }
+
+  const marginClass = [...(element?.classList || [])]
+    .concat(...siblings.map(sibling => [...sibling.classList]))
+    .find(className => /^margin-left-\d+$/.test(className));
+
+  if (marginClass) {
+    return `${marginClass.replace("margin-left-", "")}px`;
+  }
+
+  if (element) {
+    const marginLeft = parseFloat(window.getComputedStyle(element).marginLeft);
+    if (marginLeft > 0) {
+      return `${marginLeft}px`;
+    }
+  }
+
+  return "0px";
+};
+
+lib.drag.syncHorizontalPlaceholderSpacing = (parent, placeholder, dir = "h", sourceElement = null) => {
+  if (dir !== "h" || !parent || !placeholder) return;
+
+  const isFirst = parent.firstElementChild === placeholder;
+  const gap = sourceElement?._dragHorizontalGap ||
+    lib.drag.resolveHorizontalSiblingGap(parent, sourceElement, placeholder);
+
+  placeholder.style.marginLeft = isFirst ? "0" : gap;
+};
+
+lib.drag.element = (element, cb, handle = element, dir = "v") => {
+  const DRAG_THRESHOLD = 5;
+  const HOLD_DELAY_MS = 250;
+  const EDGE_SIZE = 100;
+  const MAX_SCROLL_PER_FRAME = 36;
+  const SCROLL_DELAY_MS = 500;
+  const SCROLL_ACCEL_MS = 3000;
+
+  let lastClientX = 0;
+  let lastClientY = 0;
+  let autoScrollRaf = null;
+  let scrollContainers = [window];
+  let previousHtmlScrollBehavior = "";
+  let previousBodyScrollBehavior = "";
+  let scrollAccelElapsed = 0;
+  let scrollAccelLastTs = 0;
+  let scrollCarryX = 0;
+  let scrollCarryY = 0;
+
+  // Mantém scroll/toque nativos até o hold confirmar o grab.
+  let previousHtmlTouchAction = "";
+  let previousBodyTouchAction = "";
+  let blockNativeScroll = null;
+
+  const applyIdleTouchAction = () => {
+    if (element && element.style) {
+      element.style.touchAction = "auto";
+    }
+
+    if (handle && handle.style) {
+      handle.style.touchAction = "auto";
+      handle.style.userSelect = "none";
+      handle.style.webkitUserSelect = "none";
+      handle.style.webkitTouchCallout = "none";
+    }
+  };
+
+  applyIdleTouchAction();
+
+  const lockTouch = () => {
+    if (element && element.style) {
+      element.style.touchAction = "none";
+    }
+
+    if (handle && handle.style) {
+      handle.style.touchAction = "none";
+    }
+
+    // Com grab ativo: bloqueia scroll nativo; só o auto-scroll das bordas move a tela
+    previousHtmlTouchAction = document.documentElement.style.touchAction;
+    previousBodyTouchAction = document.body.style.touchAction;
+    document.documentElement.style.touchAction = "none";
+    document.body.style.touchAction = "none";
+
+    if (!blockNativeScroll) {
+      blockNativeScroll = (e) => {
+        if (e.cancelable) e.preventDefault();
+      };
+      document.addEventListener("touchmove", blockNativeScroll, { passive: false });
+      document.addEventListener("wheel", blockNativeScroll, { passive: false });
+    }
+  };
+
+  const unlockTouch = () => {
+    applyIdleTouchAction();
+
+    document.documentElement.style.touchAction = previousHtmlTouchAction;
+    document.body.style.touchAction = previousBodyTouchAction;
+
+    if (blockNativeScroll) {
+      document.removeEventListener("touchmove", blockNativeScroll);
+      document.removeEventListener("wheel", blockNativeScroll);
+      blockNativeScroll = null;
+    }
+  };
+
+  const pauseAutoScroll = () => {
+    if (autoScrollRaf) {
+      cancelAnimationFrame(autoScrollRaf);
+      autoScrollRaf = null;
+    }
+
+    scrollAccelLastTs = 0;
+  };
+
+  const stopAutoScroll = () => {
+    pauseAutoScroll();
+    scrollAccelElapsed = 0;
+    scrollCarryX = 0;
+    scrollCarryY = 0;
+  };
+
+  const getScrollSpeed = (timestamp) => {
+    if (!scrollAccelLastTs) {
+      scrollAccelLastTs = timestamp;
+      return 0;
+    }
+
+    scrollAccelElapsed += timestamp - scrollAccelLastTs;
+    scrollAccelLastTs = timestamp;
+
+    if (scrollAccelElapsed <= SCROLL_DELAY_MS) {
+      return 0;
+    }
+
+    const progress = Math.min(1, (scrollAccelElapsed - SCROLL_DELAY_MS) / SCROLL_ACCEL_MS);
+    return MAX_SCROLL_PER_FRAME * progress;
+  };
+
+  const disableSmoothScroll = () => {
+    previousHtmlScrollBehavior = document.documentElement.style.scrollBehavior;
+    previousBodyScrollBehavior = document.body.style.scrollBehavior;
+    document.documentElement.style.scrollBehavior = "auto";
+    document.body.style.scrollBehavior = "auto";
+  };
+
+  const restoreSmoothScroll = () => {
+    document.documentElement.style.scrollBehavior = previousHtmlScrollBehavior;
+    document.body.style.scrollBehavior = previousBodyScrollBehavior;
+  };
+
+  const getScrollPosition = () => {
+    const scroller = document.scrollingElement || document.documentElement;
+    return {
+      scroller,
+      top: window.pageYOffset || scroller.scrollTop || 0,
+      left: window.pageXOffset || scroller.scrollLeft || 0
+    };
+  };
+
+  const setScrollPosition = (left, top) => {
+    const scroller = document.scrollingElement || document.documentElement;
+    scroller.scrollLeft = left;
+    scroller.scrollTop = top;
+    window.scrollTo(left, top);
+  };
+
+  const getScrollContainers = () => {
+    const containers = [window];
+    let parent = element._dragPlaceholder?.parentNode;
+
+    while (parent && parent !== document.body && parent !== document.documentElement) {
+      const style = window.getComputedStyle(parent);
+      const overflowY = style.overflowY;
+      const overflowX = style.overflowX;
+      const overflow = style.overflow;
+      const canScrollY = /(auto|scroll)/.test(overflowY) || /(auto|scroll)/.test(overflow);
+      const canScrollX = /(auto|scroll)/.test(overflowX) || /(auto|scroll)/.test(overflow);
+
+      if ((canScrollY && parent.scrollHeight > parent.clientHeight) ||
+        (canScrollX && parent.scrollWidth > parent.clientWidth)) {
+        containers.push(parent);
+      }
+
+      parent = parent.parentNode;
+    }
+
+    return containers;
+  };
+
+  const scrollByAmount = (container, x, y) => {
+    if (!x && !y) return;
+
+    if (container === window) {
+      const { scroller, top, left } = getScrollPosition();
+      scroller.scrollLeft = left + x;
+      scroller.scrollTop = top + y;
+      return;
+    }
+
+    container.scrollLeft += x;
+    container.scrollTop += y;
+  };
+
+  const isWindowRect = (rect) =>
+    rect.left === 0 && rect.top === 0 &&
+    rect.right >= window.innerWidth - 1 &&
+    rect.bottom >= window.innerHeight - 1;
+
+  const edgeScrollDelta = (clientX, clientY, rect, speed) => {
+    let x = 0;
+    let y = 0;
+
+    if (clientY < rect.top + EDGE_SIZE) {
+      y = -speed;
+    } else if (clientY > rect.bottom - EDGE_SIZE) {
+      y = speed;
+    }
+
+    // "h": scroll horizontal normal
+    // "g": só em containers internos — na janela a borda lateral no mobile
+    // cancela o pointer (drag solta sozinho após poucos pixels)
+    if (dir === "h" || (dir === "g" && !isWindowRect(rect))) {
+      if (clientX < rect.left + EDGE_SIZE) {
+        x = -speed;
+      } else if (clientX > rect.right - EDGE_SIZE) {
+        x = speed;
+      }
+    }
+
+    return { x, y };
+  };
+
+  const takeScrollStep = (carry, delta) => {
+    const next = carry + delta;
+    const step = next > 0 ? Math.floor(next) : Math.ceil(next);
+    return { step, carry: next - step };
+  };
 
   const createPlaceholder = () => {
+    const rect = element.getBoundingClientRect();
     const placeholder = document.createElement("div");
 
     placeholder.className = "drag-placeholder";
-    placeholder.style.height = `${element.offsetHeight}px`;
-    placeholder.style.width = `${element.offsetWidth}px`;
+    placeholder.style.height = `${rect.height}px`;
+    placeholder.style.width = `${rect.width}px`;
     placeholder.style.boxSizing = "border-box";
     placeholder.style.flexShrink = "0";
 
     element._dragPlaceholder = placeholder;
+    element.parentNode.insertBefore(placeholder, element);
 
-    element.parentNode.insertBefore(placeholder, element.nextSibling);
+    if (dir === "h") {
+      element._dragHorizontalGap = lib.drag.resolveHorizontalSiblingGap(
+        element.parentNode,
+        element,
+        placeholder
+      );
+    }
 
-    setTimeout(() => {
-      element.classList.add("dragging");
-    }, 0);
+    if (dir === "g") {
+      const style = window.getComputedStyle(element);
+      placeholder.style.marginLeft = style.marginLeft;
+      placeholder.style.marginRight = style.marginRight;
+      placeholder.style.marginTop = style.marginTop;
+      placeholder.style.marginBottom = style.marginBottom;
+    }
+
+    syncHorizontalPlaceholderSpacing(element.parentNode, placeholder);
 
     return placeholder;
   };
 
-  const createGhost = (x, y) => {
-    if (element._dragGhost) return;
+  const attachFloating = () => {
+    const rect = element.getBoundingClientRect();
 
-    const ghost = element.cloneNode(true);
+    element._dragWidth = rect.width;
+    element._dragHeight = rect.height;
 
-    ghost.classList.remove("dragging");
-    ghost.classList.add("drag-ghost");
+    createPlaceholder();
 
-    ghost.style.position = "fixed";
-    ghost.style.left = `${x}px`;
-    ghost.style.top = `${y}px`;
-    ghost.style.width = `${element.offsetWidth}px`;
-    ghost.style.pointerEvents = "none";
-    ghost.style.zIndex = "999999";
-    ghost.style.transform = "translate(-50%, -50%)";
+    document.body.appendChild(element);
 
-    document.body.append(ghost);
-
-    element._dragGhost = ghost;
+    element.classList.add("drag-floating", "noselect");
+    element.style.position = "fixed";
+    element.style.left = "0";
+    element.style.top = "0";
+    element.style.width = `${rect.width}px`;
+    element.style.height = `${rect.height}px`;
+    element.style.minWidth = `${rect.width}px`;
+    element.style.minHeight = `${rect.height}px`;
+    element.style.margin = "0";
+    element.style.zIndex = "999999";
+    element.style.pointerEvents = "none";
+    element.style.boxShadow = "0 8px 20px rgba(0, 0, 0, 0.25)";
+    element.style.willChange = "transform";
+    element.style.transform = `translate3d(${rect.left}px, ${rect.top}px, 0)`;
   };
 
-  const moveGhost = (x, y) => {
-    if (!element._dragGhost) return;
+  const moveFloating = (clientX, clientY) => {
+    if (!element.classList.contains("drag-floating")) return;
 
-    element._dragGhost.style.left = `${x}px`;
-    element._dragGhost.style.top = `${y}px`;
+    const offsetX = element._dragOffsetX ?? 0;
+    const offsetY = element._dragOffsetY ?? 0;
+
+    element.style.transform = `translate3d(${clientX - offsetX}px, ${clientY - offsetY}px, 0)`;
   };
 
-  const removeGhost = () => {
-    if (!element._dragGhost) return;
+  const DROP_ANIM_MS = 220;
 
-    element._dragGhost.remove();
-    element._dragGhost = null;
+  const clearFloating = () => {
+    element.classList.remove("drag-floating", "dragging", "noselect");
+    element.style.position = "";
+    element.style.left = "";
+    element.style.top = "";
+    element.style.width = "";
+    element.style.height = "";
+    element.style.minWidth = "";
+    element.style.minHeight = "";
+    element.style.margin = "";
+    element.style.zIndex = "";
+    element.style.pointerEvents = "";
+    element.style.boxShadow = "";
+    element.style.willChange = "";
+    element.style.transition = "";
+    element.style.transform = "";
+    element._dragWidth = null;
+    element._dragHeight = null;
+    element._dragOffsetX = null;
+    element._dragOffsetY = null;
+    element._dragHorizontalGap = null;
+    element._dragSettling = false;
   };
 
-  const finishDrag = () => {
-    if (!element._dragPlaceholder) {
-      removeGhost();
+  const settleFloatingToPlaceholder = (onDone) => {
+    const placeholder = element._dragPlaceholder;
+    if (!placeholder || !placeholder.isConnected) {
+      onDone();
       return;
     }
 
+    const fromRect = element.getBoundingClientRect();
+    const toRect = placeholder.getBoundingClientRect();
+    const dx = Math.abs(fromRect.left - toRect.left);
+    const dy = Math.abs(fromRect.top - toRect.top);
+
+    if (dx < 2 && dy < 2) {
+      onDone();
+      return;
+    }
+
+    element._dragSettling = true;
+    element.style.transition = "none";
+    element.style.transform = `translate3d(${fromRect.left}px, ${fromRect.top}px, 0)`;
+    void element.offsetWidth;
+
+    element.style.transition = `transform ${DROP_ANIM_MS}ms ease-out, box-shadow ${DROP_ANIM_MS}ms ease-out`;
+    element.style.boxShadow = "0 2px 6px rgba(0, 0, 0, 0.12)";
+    element.style.transform = `translate3d(${toRect.left}px, ${toRect.top}px, 0)`;
+
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      element.removeEventListener("transitionend", onTransitionEnd);
+      onDone();
+    };
+
+    const onTransitionEnd = (e) => {
+      if (e.target !== element) return;
+      if (e.propertyName && e.propertyName !== "transform") return;
+      finish();
+    };
+
+    element.addEventListener("transitionend", onTransitionEnd);
+    setTimeout(finish, DROP_ANIM_MS + 80);
+  };
+
+  const cancelDrag = () => {
+    stopAutoScroll();
+
+    const { left, top } = getScrollPosition();
+
+    if (element._dragPlaceholder) {
+      const placeholder = element._dragPlaceholder;
+
+      settleFloatingToPlaceholder(() => {
+        clearFloating();
+        if (placeholder.isConnected) {
+          placeholder.replaceWith(element);
+        }
+        element._dragPlaceholder = null;
+        setScrollPosition(left, top);
+        restoreSmoothScroll();
+      });
+      return;
+    }
+
+    clearFloating();
+    setScrollPosition(left, top);
+    restoreSmoothScroll();
+  };
+
+  const finishDrag = () => {
+    stopAutoScroll();
+
+    if (!element._dragPlaceholder) {
+      cancelDrag();
+      return;
+    }
+
+    const { left, top } = getScrollPosition();
     const placeholder = element._dragPlaceholder;
     const parent = placeholder.parentNode;
 
@@ -2642,142 +3384,391 @@ lib.drag.element = (element, cb, handle = element, dir = "v") => {
       .filter(el => el !== element)
       .indexOf(placeholder);
 
-    placeholder.replaceWith(element);
+    settleFloatingToPlaceholder(() => {
+      clearFloating();
+      if (placeholder.isConnected) {
+        placeholder.replaceWith(element);
+      }
+      element._dragPlaceholder = null;
+      setScrollPosition(left, top);
+      restoreSmoothScroll();
 
-    element._dragPlaceholder = null;
-    element.classList.remove("dragging");
-
-    removeGhost();
-
-    cb({
-      element_id: element.id,
-      position
+      cb({
+        element_id: element.id,
+        position
+      });
     });
   };
 
-  handle.addEventListener("mousedown", () => {
-    dragAllowed = true;
-  });
+  const syncHorizontalPlaceholderSpacing = (parent, placeholder) => {
+    lib.drag.syncHorizontalPlaceholderSpacing(parent, placeholder, dir, element);
+  };
 
-  document.addEventListener("mouseup", () => {
-    dragAllowed = false;
-  });
-
-  element.addEventListener("dragstart", (e) => {
-    if (!dragAllowed) {
-      e.preventDefault();
+  const placePlaceholderBefore = (parent, placeholder, referenceNode) => {
+    if (referenceNode == null) {
+      if (parent.lastChild !== placeholder) {
+        parent.appendChild(placeholder);
+      }
+      syncHorizontalPlaceholderSpacing(parent, placeholder);
       return;
     }
 
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", element.id);
-
-    const img = new Image();
-    img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
-    e.dataTransfer.setDragImage(img, 0, 0);
-
-    const placeholder = createPlaceholder();
-
-    createGhost(e.clientX, e.clientY);
-
-    placeholder.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-    });
-
-    placeholder.addEventListener("drop", (e) => {
-      e.preventDefault();
-      finishDrag();
-    });
-  });
-
-  element.addEventListener("drag", (e) => {
-    if (e.clientX === 0 && e.clientY === 0) return;
-
-    moveGhost(e.clientX, e.clientY);
-  });
-
-  element.addEventListener("dragend", () => {
-    finishDrag();
-    dragAllowed = false;
-  });
-
-  handle.addEventListener("touchstart", (e) => {
-    if (element._dragPlaceholder) return;
-
-    const touch = e.touches[0];
-
-    element._dragTimeout = setTimeout(() => {
-      createPlaceholder();
-      createGhost(touch.clientX, touch.clientY);
-      element._dragTimeout = null;
-    }, 250);
-  });
-
-  handle.addEventListener("touchmove", (e) => {
-    if (element._dragTimeout) {
-      clearTimeout(element._dragTimeout);
-      element._dragTimeout = null;
-      return;
+    if (placeholder.nextSibling !== referenceNode) {
+      parent.insertBefore(placeholder, referenceNode);
     }
 
+    syncHorizontalPlaceholderSpacing(parent, placeholder);
+  };
+
+  const repositionPlaceholder = (clientX, clientY) => {
     if (!element._dragPlaceholder) return;
 
-    e.preventDefault();
-
-    const touch = e.touches[0];
-
-    moveGhost(touch.clientX, touch.clientY);
-
-    const dropArea = [...element.parentNode.children].find(child => {
-      if (child === element) return false;
-      if (child === element._dragPlaceholder) return false;
-
-      const rect = child.getBoundingClientRect();
-
-      return (
-        touch.clientX >= rect.left &&
-        touch.clientX <= rect.right &&
-        touch.clientY >= rect.top &&
-        touch.clientY <= rect.bottom
-      );
-    });
-
-    if (!dropArea) return;
+    const parent = element._dragPlaceholder.parentNode;
+    if (!parent) return;
 
     const placeholder = element._dragPlaceholder;
-    const parent = dropArea.parentNode;
-    const rect = dropArea.getBoundingClientRect();
+    const siblings = [...parent.children].filter(child => child !== placeholder);
+    if (!siblings.length) return;
 
     if (dir === "v") {
-      const middleY = rect.top + rect.height / 2;
+      let lo = 0;
+      let hi = siblings.length;
 
-      if (touch.clientY < middleY) {
-        parent.insertBefore(placeholder, dropArea);
-      } else {
-        parent.insertBefore(placeholder, dropArea.nextSibling);
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const rect = siblings[mid].getBoundingClientRect();
+
+        if (clientY < rect.top + rect.height / 2) {
+          hi = mid;
+        } else {
+          lo = mid + 1;
+        }
       }
+
+      placePlaceholderBefore(parent, placeholder, siblings[lo] || null);
+      return;
     }
 
     if (dir === "h") {
-      const middleX = rect.left + rect.width / 2;
+      let lo = 0;
+      let hi = siblings.length;
 
-      if (touch.clientX < middleX) {
-        parent.insertBefore(placeholder, dropArea);
-      } else {
-        parent.insertBefore(placeholder, dropArea.nextSibling);
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const rect = siblings[mid].getBoundingClientRect();
+
+        if (clientX < rect.left + rect.width / 2) {
+          hi = mid;
+        } else {
+          lo = mid + 1;
+        }
       }
-    }
-  }, { passive: false });
 
-  handle.addEventListener("touchend", () => {
-    if (element._dragTimeout) {
-      clearTimeout(element._dragTimeout);
-      element._dragTimeout = null;
+      placePlaceholderBefore(parent, placeholder, siblings[lo] || null);
       return;
     }
 
-    finishDrag();
+    if (dir === "g") {
+      let insertBeforeNode = null;
+
+      for (let i = 0; i < siblings.length; i++) {
+        const rect = siblings[i].getBoundingClientRect();
+
+        if (clientY < rect.top) {
+          insertBeforeNode = siblings[i];
+          break;
+        }
+
+        if (clientY <= rect.bottom) {
+          if (clientX < rect.left + rect.width / 2) {
+            insertBeforeNode = siblings[i];
+            break;
+          }
+        }
+      }
+
+      placePlaceholderBefore(parent, placeholder, insertBeforeNode);
+    }
+  };
+
+  const isNearEdge = (clientX, clientY) => {
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+
+    if (clientY < EDGE_SIZE || clientY > viewportHeight - EDGE_SIZE) {
+      return true;
+    }
+
+    // Grid não considera borda lateral da janela (evita pointercancel no mobile)
+    if (dir === "h" && (clientX < EDGE_SIZE || clientX > viewportWidth - EDGE_SIZE)) {
+      return true;
+    }
+
+    if (dir === "g") {
+      for (const container of scrollContainers) {
+        if (container === window) continue;
+        const rect = container.getBoundingClientRect();
+        if (clientX < rect.left + EDGE_SIZE || clientX > rect.right - EDGE_SIZE) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  const autoScrollTick = (timestamp) => {
+    if (!element._dragPlaceholder) {
+      stopAutoScroll();
+      return;
+    }
+
+    if (!isNearEdge(lastClientX, lastClientY)) {
+      stopAutoScroll();
+      return;
+    }
+
+    const speed = getScrollSpeed(timestamp);
+    let deltaX = 0;
+    let deltaY = 0;
+
+    for (const container of scrollContainers) {
+      const rect = container === window
+        ? { top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight }
+        : container.getBoundingClientRect();
+
+      const delta = edgeScrollDelta(lastClientX, lastClientY, rect, speed);
+
+      if (container === window) {
+        deltaX += delta.x;
+        deltaY += delta.y;
+      } else if (delta.x || delta.y) {
+        const xStep = takeScrollStep(0, delta.x);
+        const yStep = takeScrollStep(0, delta.y);
+        scrollByAmount(container, xStep.step, yStep.step);
+      }
+    }
+
+    const xScroll = takeScrollStep(scrollCarryX, deltaX);
+    const yScroll = takeScrollStep(scrollCarryY, deltaY);
+    scrollCarryX = xScroll.carry;
+    scrollCarryY = yScroll.carry;
+
+    if (xScroll.step || yScroll.step) {
+      scrollByAmount(window, xScroll.step, yScroll.step);
+    }
+
+    moveFloating(lastClientX, lastClientY);
+    repositionPlaceholder(lastClientX, lastClientY);
+    autoScrollRaf = requestAnimationFrame(autoScrollTick);
+  };
+
+  const startPointerDrag = () => {
+    if (element._dragPlaceholder) return;
+
+    disableSmoothScroll();
+    attachFloating();
+    scrollContainers = getScrollContainers();
+  };
+
+  const movePointerDrag = (clientX, clientY) => {
+    lastClientX = clientX;
+    lastClientY = clientY;
+
+    moveFloating(clientX, clientY);
+    repositionPlaceholder(clientX, clientY);
+
+    if (isNearEdge(clientX, clientY)) {
+      if (!autoScrollRaf) {
+        autoScrollRaf = requestAnimationFrame(autoScrollTick);
+      }
+      return;
+    }
+
+    stopAutoScroll();
+  };
+
+  handle.addEventListener("dragstart", (e) => e.preventDefault());
+  element.addEventListener("dragstart", (e) => e.preventDefault());
+
+  const findHorizontalScroller = () => {
+    let parent = element.parentElement;
+
+    while (parent && parent !== document.body) {
+      const style = window.getComputedStyle(parent);
+      const overflowX = style.overflowX;
+
+      if ((overflowX === "auto" || overflowX === "scroll") &&
+        parent.scrollWidth > parent.clientWidth) {
+        return parent;
+      }
+
+      parent = parent.parentElement;
+    }
+
+    return null;
+  };
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (!e.isPrimary) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (element._dragPlaceholder || element._dragSettling) return;
+
+    const pointerId = e.pointerId;
+    let originX = e.clientX;
+    let originY = e.clientY;
+    let lastX = originX;
+    let lastY = originY;
+    let prevX = originX;
+    let prevY = originY;
+    let dragging = false;
+    let holdTimer = null;
+
+    const beginDrag = (clientX, clientY) => {
+      if (dragging) return;
+
+      dragging = true;
+      clearTimeout(holdTimer);
+      document.body.classList.add("noselect", "drag-grabbing");
+      lockTouch();
+
+      try {
+        handle.setPointerCapture(pointerId);
+      } catch (_) { }
+
+      const rect = element.getBoundingClientRect();
+      const inside =
+        clientX >= rect.left && clientX <= rect.right &&
+        clientY >= rect.top && clientY <= rect.bottom;
+
+      // If the pointer left the image while holding, snap the thumb to the hand
+      if (inside) {
+        element._dragOffsetX = clientX - rect.left;
+        element._dragOffsetY = clientY - rect.top;
+      } else {
+        element._dragOffsetX = rect.width / 2;
+        element._dragOffsetY = rect.height / 2;
+      }
+
+      // Reparent para o body costuma disparar lostpointercapture/pointercancel no mobile
+      element._dragReparenting = true;
+      startPointerDrag();
+      try {
+        handle.setPointerCapture(pointerId);
+      } catch (_) { }
+      element._dragReparenting = false;
+
+      movePointerDrag(clientX, clientY);
+    };
+
+    const scheduleHold = () => {
+      clearTimeout(holdTimer);
+      if (dragging) return;
+      holdTimer = setTimeout(() => {
+        beginDrag(lastX, lastY);
+      }, HOLD_DELAY_MS);
+    };
+
+    scheduleHold();
+
+    let cleaned = false;
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearTimeout(holdTimer);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerCancel);
+      handle.removeEventListener("lostpointercapture", onLostCapture);
+
+      try {
+        if (handle.hasPointerCapture?.(pointerId)) {
+          handle.releasePointerCapture(pointerId);
+        }
+      } catch (_) { }
+
+      document.body.classList.remove("noselect", "drag-grabbing");
+      unlockTouch();
+    };
+
+    const onPointerMove = (moveEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+
+      const clientX = moveEvent.clientX;
+      const clientY = moveEvent.clientY;
+      const deltaX = clientX - prevX;
+      const deltaY = clientY - prevY;
+      prevX = clientX;
+      prevY = clientY;
+      lastX = clientX;
+      lastY = clientY;
+
+      if (!dragging) {
+        const dx = Math.abs(clientX - originX);
+        const dy = Math.abs(clientY - originY);
+
+        // Movimento antes do hold = scroll/gesto normal: cancela o grab
+        if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
+          clearTimeout(holdTimer);
+          holdTimer = null;
+
+          // Keep the gesture alive while panning horizontal thumb strips
+          if (dir === "h" && Math.abs(deltaX) >= Math.abs(deltaY)) {
+            const scroller = findHorizontalScroller();
+            if (scroller) {
+              scroller.scrollLeft -= deltaX;
+              moveEvent.preventDefault();
+            }
+          }
+        }
+        return;
+      }
+
+      moveEvent.preventDefault();
+      movePointerDrag(clientX, clientY);
+    };
+
+    const endDrag = () => {
+      cleanup();
+
+      if (dragging) {
+        finishDrag();
+      } else {
+        cancelDrag();
+      }
+    };
+
+    const onPointerUp = (upEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      endDrag();
+    };
+
+    // Ao mover o elemento para o body o mobile dispara cancel/lost — recaptura só nesse momento
+    const onPointerCancel = (cancelEvent) => {
+      if (cancelEvent.pointerId !== pointerId) return;
+      if (element._dragReparenting) {
+        try {
+          handle.setPointerCapture(pointerId);
+          return;
+        } catch (_) { }
+      }
+      endDrag();
+    };
+
+    const onLostCapture = (lostEvent) => {
+      if (lostEvent.pointerId !== pointerId) return;
+      if (!element._dragReparenting) return;
+      try {
+        handle.setPointerCapture(pointerId);
+      } catch (_) { }
+    };
+
+    // Não preventDefault no pointerdown: libera scroll até o hold confirmar o grab
+    document.addEventListener("pointermove", onPointerMove, { passive: false });
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerCancel);
+    handle.addEventListener("lostpointercapture", onLostCapture);
   });
 };
 
@@ -2786,13 +3777,14 @@ lib.drag.drop = (dropArea, targetArea, css, dir) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
 
-    const draggedElement = document.querySelector(".dragging");
+    const draggedElement = document.querySelector(".drag-floating");
 
     if (!draggedElement) return;
     if (dropArea === draggedElement) return;
 
     const placeholder = draggedElement._dragPlaceholder;
     if (!placeholder) return;
+    if (!targetArea && dir !== "g" && dropArea.parentNode !== placeholder.parentNode) return;
 
     const parent = targetArea || dropArea.parentNode;
     const rect = dropArea.getBoundingClientRect();
@@ -2811,6 +3803,19 @@ lib.drag.drop = (dropArea, targetArea, css, dir) => {
       const middleX = rect.left + rect.width / 2;
 
       if (e.clientX < middleX) {
+        parent.insertBefore(placeholder, dropArea);
+      } else {
+        parent.insertBefore(placeholder, dropArea.nextSibling);
+      }
+
+      lib.drag.syncHorizontalPlaceholderSpacing(parent, placeholder, dir, draggedElement);
+    }
+
+    if (dir === "g") {
+      const middleX = rect.left + rect.width / 2;
+      const middleY = rect.top + rect.height / 2;
+
+      if (e.clientY < middleY || e.clientX < middleX) {
         parent.insertBefore(placeholder, dropArea);
       } else {
         parent.insertBefore(placeholder, dropArea.nextSibling);
@@ -3102,5 +4107,24 @@ lib.autoResizeTextarea = (textarea, min_height = 0) => {
 };
 
 lib.resizeOnAttach = (element, min_height = 50) => {
-  lib.autoResizeTextarea(element, min_height);
+  if (!element) return;
+
+  if (element.tagName === "TEXTAREA") {
+    lib.autoResizeTextarea(element, min_height);
+    return;
+  }
+
+  function tryResize() {
+    if (element.offsetHeight > 0) {
+      if (typeof autoResizeEditableDiv === "function") {
+        autoResizeEditableDiv(element, min_height);
+      } else {
+        lib.autoResizeTextarea(element, min_height);
+      }
+    } else {
+      requestAnimationFrame(tryResize);
+    }
+  }
+
+  tryResize();
 };

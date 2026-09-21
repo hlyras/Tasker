@@ -20,6 +20,9 @@
         <img id="diary-icon"
           class='image-prop size-30 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
           src='/images/icon/diary.png'>
+        <img id="whiteboard-icon"
+          class='image-prop size-30 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
+          src='/images/icon/whiteboard.svg'>
         <img id="books-icon"
           class='image-prop size-30 border shadow-lg-st radius-5 opacity-out-08 padding-5 margin-right-5 pointer'
           src='/images/icon/books.png'>
@@ -51,6 +54,7 @@
         <%- include('./calendar/home.ejs') %>
         <%- include('./calendar/main.ejs') %>
         <%- include('./note/main.ejs') %>
+        <%- include('./whiteboard/main.ejs') %>
         <%- include('./workout/main.ejs') %>
 
         <div class="box b1 container margin-top-5">
@@ -76,6 +80,7 @@
   <script src="/js/workout/main.js"></script>
   <script src="/js/avulsa/main.js"></script>
   <script src="/js/calendar/main.js"></script>
+  <script src="/js/whiteboard/main.js"></script>
 
   <script>
     document.addEventListener('DOMContentLoaded', async function () {
@@ -88,6 +93,7 @@
       let task_icon = document.getElementById("task-icon");
       let calendar_icon = document.getElementById("calendar-icon");
       let diary_icon = document.getElementById("diary-icon");
+      let whiteboard_icon = document.getElementById("whiteboard-icon");
       let workout_icon = document.getElementById("workout-icon");
 
       goal_icon.addEventListener("click", async () => {
@@ -108,6 +114,10 @@
 
       diary_icon.addEventListener("click", async () => {
         lib.popup(await diaryPopup(), false, true);
+      });
+
+      whiteboard_icon.addEventListener("click", async () => {
+        lib.popup(await whiteboardPopup(), false, true);
       });
 
       workout_icon.addEventListener("click", async () => {

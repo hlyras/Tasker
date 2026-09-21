@@ -1,34 +1,34 @@
 const db = require('../../../config/connection');
 const lib = require('jarmlib');
 
-const Note = function () {
+const Whiteboard = function () {
   this.id;
   this.datetime;
-  this.content;
-  this.status;
-  this.sort_order;
+  this.name;
+  this.description;
+  this.canvas;
 
   this.create = () => {
     let obj = lib.convertTo.object(this);
-    let { query, values } = lib.Query.save(obj, 'cms_tasker.note');
+    let { query, values } = lib.Query.save(obj, 'cms_tasker.whiteboard');
 
     return db(query, values);
   };
 
   this.update = () => {
-    if (!this.id) { return { err: "O id da anotação é inválido" }; }
+    if (!this.id) { return { err: "O id do quadro é inválido" }; }
 
     let obj = lib.convertTo.object(this);
-    let { query, values } = lib.Query.update(obj, 'cms_tasker.note', 'id');
+    let { query, values } = lib.Query.update(obj, 'cms_tasker.whiteboard', 'id');
 
     return db(query, values);
   };
 };
 
-Note.filter = ({ props, inners, params, strict_params, order_params }) => {
+Whiteboard.filter = ({ props, inners, params, strict_params, order_params }) => {
   let { query, values } = new lib.Query().select()
     .props(props)
-    .table("cms_tasker.note")
+    .table("cms_tasker.whiteboard")
     .inners(inners)
     .params(params)
     .strictParams(strict_params)
@@ -36,9 +36,9 @@ Note.filter = ({ props, inners, params, strict_params, order_params }) => {
   return db(query, values);
 };
 
-Note.delete = async (id) => {
-  let query = `DELETE FROM cms_tasker.note WHERE id = ?;`;
+Whiteboard.delete = async (id) => {
+  let query = `DELETE FROM cms_tasker.whiteboard WHERE id = ?;`;
   return db(query, [id]);
 };
 
-module.exports = Note;
+module.exports = Whiteboard;

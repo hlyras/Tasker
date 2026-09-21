@@ -114,11 +114,13 @@ tr:hover {
 .grab {
   cursor: -webkit-grab;
   cursor: -moz-grab;
+  cursor: grab;
 }
 
 .grab:active {
   cursor: -webkit-grabbing;
   cursor: -moz-grabbing;
+  cursor: grabbing;
 }
 
 .carousel-btn {}
@@ -1121,6 +1123,11 @@ ul {
   cursor: grabbing;
 }
 
+body.drag-grabbing,
+body.drag-grabbing * {
+  cursor: grabbing !important;
+}
+
 /*INPUTS*/
 .input-generic {
   background-color: var(--ground);
@@ -1235,6 +1242,30 @@ ul {
   background-color: #15803d;
   color: #fff;
   transform: translateY(-1px);
+}
+
+.pulse {
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.18);
+  }
+}
+
+.btn-moveup {
+  transition: all 0.2s ease;
+}
+
+.btn-moveup:hover {
+  transform: translate(1px, -1px);
 }
 
 .btn-cancel {
@@ -6481,6 +6512,21 @@ textarea,
   border-radius: 8px;
 }
 
+.diary-note-header {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.diary-note-header > div:not(.flex-1) {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.diary-note-item.is-inactive {
+  opacity: 0.7;
+}
+
 .diary-note-item textarea {
   resize: none;
   overflow: hidden;
@@ -6491,6 +6537,322 @@ textarea,
   min-width: 280px;
   max-width: 520px;
   width: 100%;
+}
+
+.whiteboard-list-popup {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 320px;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.whiteboard-list-box {
+  flex: 1;
+  min-height: 0;
+  max-height: calc(100dvh - 280px);
+  width: 100%;
+}
+
+.whiteboard-list-item {
+  width: 100%;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.whiteboard-list-item .v-center {
+  align-self: center;
+}
+
+.whiteboard-popup {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  touch-action: none;
+}
+
+.whiteboard-toolbar {
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.whiteboard-tool,
+.whiteboard-zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--light);
+  border-radius: 8px;
+  background: var(--ground);
+  cursor: pointer;
+  user-select: none;
+}
+
+.whiteboard-tool.is-active {
+  background: var(--light);
+  border-color: var(--solid);
+}
+
+.whiteboard-zoom-label {
+  min-width: 48px;
+  text-align: center;
+}
+
+.whiteboard-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+  background-color: #f6f3ec;
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  border: 1px solid var(--light);
+  border-radius: 8px;
+  cursor: grab;
+}
+
+.whiteboard-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.whiteboard-viewport.is-text {
+  cursor: text;
+}
+
+.whiteboard-viewport.is-arrow {
+  cursor: crosshair;
+}
+
+.whiteboard-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.whiteboard-text-box {
+  position: absolute;
+  min-width: 64px;
+  min-height: 32px;
+  touch-action: none;
+}
+
+.whiteboard-text-box.has-size {
+  box-sizing: border-box;
+}
+
+.whiteboard-text {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 48px;
+  max-width: 360px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color);
+  font-family: Lucida Grande, Arial, sans-serif;
+  font-size: 30px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.whiteboard-text-box.has-size .whiteboard-text {
+  max-width: none;
+  overflow: auto;
+}
+
+.whiteboard-text.is-selected {
+  border-color: #3b6ea5;
+  box-shadow: 0 0 0 2px rgba(59, 110, 165, 0.18);
+}
+
+.whiteboard-text.is-editing {
+  user-select: text;
+  cursor: text;
+  background: #fff;
+}
+
+.whiteboard-text:empty::before {
+  content: "Texto";
+  color: var(--disabled);
+}
+
+.whiteboard-arrow {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.whiteboard-arrow-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.whiteboard-arrow.is-selected .whiteboard-arrow-line {
+  stroke: #3b6ea5;
+}
+
+.whiteboard-handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #3b6ea5;
+  pointer-events: auto;
+  cursor: grab;
+  z-index: 2;
+  touch-action: none;
+}
+
+.whiteboard-handle::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+}
+
+.whiteboard-arrow-handle {
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  margin-top: -11px;
+}
+
+.whiteboard-arrow-handle::before {
+  inset: -16px;
+}
+
+.whiteboard-text-handle {
+  margin: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+
+.whiteboard-text-handle::before {
+  inset: -14px;
+}
+
+.whiteboard-text-handle[data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.whiteboard-text-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.whiteboard-text-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.whiteboard-text-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
+.whiteboard-text-handle[data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.whiteboard-text-handle[data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.whiteboard-text-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.whiteboard-text-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+
+.whiteboard-text-toolbar {
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 4px;
+  background: #fff;
+  border: 1px solid var(--light);
+  border-radius: 8px;
+  pointer-events: auto;
+  transform: translate(-50%, -100%) scale(calc(1 / var(--wb-zoom, 1)));
+  transform-origin: center bottom;
+}
+
+.whiteboard-toolbar-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.whiteboard-toolbar-btn.is-active,
+.whiteboard-toolbar-btn:hover {
+  background: var(--light);
+}
+
+.whiteboard-font-size-label {
+  min-width: 20px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--strong);
+  user-select: none;
+}
+
+.whiteboard-delete {
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--light);
+  border-radius: 6px;
+  color: var(--color);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate(-50%, -100%) scale(calc(1 / var(--wb-zoom, 1)));
+  transform-origin: center bottom;
+}
+
+.whiteboard-text-toolbar .whiteboard-delete {
+  position: static;
+  width: 24px;
+  height: 24px;
+  transform: none;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+}
+
+.whiteboard-text-toolbar .whiteboard-delete:hover {
+  background: var(--light);
+}
+
+.whiteboard-delete svg {
+  display: block;
+  pointer-events: none;
+}
+
+.whiteboard-delete-arrow {
+  left: 0;
+}
+
+.whiteboard-hint {
+  color: var(--strong);
 }
 
 @media (max-width: 900px) {

@@ -53,5 +53,6 @@ router.use("/note", require("./note"));
 router.use("/workout", require("./workout"));
 router.use("/avulsa", require("./avulsa"));
 router.use("/calendar", require("./calendar"));
+router.use("/whiteboard", require("./whiteboard"));
 
 module.exports = router;

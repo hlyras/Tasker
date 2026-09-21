@@ -18,6 +18,19 @@
       src: "/images/icon/diary.png"
     }));
 
+    const note_status_select = lib.element.create("select", {
+      class: "box b1 lucida-grande bold rem09 padding-10 margin-bottom-10"
+    });
+    popup.append(note_status_select);
+
+    note_status_select.append(lib.element.create("option", {
+      value: "Ativo"
+    }, "Ativo"));
+
+    note_status_select.append(lib.element.create("option", {
+      value: "Inativo"
+    }, "Inativo"));
+
     const notes_box = lib.element.create("div", {
       id: "diary-notes-box",
       class: "box b1 container diary-notes-box scroll-y-auto margin-bottom-10"
@@ -48,20 +61,31 @@
     const renderNotes = async () => {
       notes_box.innerHTML = "";
 
-      const notes = await API.response(Note.filter, {});
+      const viewing_inactive = note_status_select.value === "Inativo";
+      create_box.style.display = viewing_inactive ? "none" : "";
+
+      const notes = await API.response(Note.filter, {
+        status: note_status_select.value
+      });
       if (!notes) { return; }
+
+      notes.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || b.id - a.id);
 
       if (!notes.length) {
         notes_box.append(lib.element.create("div", {
           class: "box b1 lucida-grande bold padding-20 center opacity-out-08"
-        }, "Nenhuma anotação"));
+        }, viewing_inactive ? "Nenhuma anotação inativa" : "Nenhuma anotação ativa"));
         return;
       }
 
       notes.forEach(note => {
-        notes_box.append(noteDiv(note, renderNotes));
+        notes_box.append(noteDiv(note, notes_box, viewing_inactive));
       });
     };
+
+    note_status_select.addEventListener("change", async () => {
+      await renderNotes();
+    });
 
     save_button.addEventListener("click", async () => {
       const content = content_input.value.trim();
@@ -73,6 +97,7 @@
       if (!response) { return; }
 
       content_input.value = "";
+      note_status_select.value = "Ativo";
       lib.message(response.done, async () => {
         await renderNotes();
       });
@@ -83,23 +108,62 @@
     return popup;
   }
 
-  function noteDiv(note, onRefresh) {
+  async function updateNoteOrder(container) {
+    if (!container) { return; }
+
+    let order = 1;
+
+    for (const item of container.children) {
+      if (!item.id || !String(item.id).startsWith("note-")) { continue; }
+
+      await API.response(Note.update, {
+        id: item.id.replace("note-", ""),
+        sort_order: order
+      }, "none");
+
+      order++;
+    }
+  }
+
+  function noteMoveIcon() {
+    return lib.element.svg("opacity-out-08 v-center grab", "18",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+  }
+
+  function noteDiv(note, notes_box, viewing_inactive) {
     const note_div = lib.element.create("div", {
-      class: "box b1 container diary-note-item ground border padding-5 margin-bottom-10"
+      class: `box b1 container diary-note-item ground border padding-5 margin-bottom-10 sortable-item${viewing_inactive ? " is-inactive" : ""}`
     });
 
+    note_div.id = `note-${note.id}`;
+
     const header = lib.element.create("div", {
-      class: "mobile-box container padding-3"
+      class: "mobile-box container padding-3 diary-note-header"
     });
     note_div.append(header);
 
     header.append(lib.element.create("div", {
-      class: "mobile-box a1 lucida-grande rem07 opacity-out-08 v-center"
+      class: "mobile-box flex-1 lucida-grande rem07 opacity-out-08 v-center"
     }, lib.timestampToDatetime(note.datetime)));
 
-    const delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer",
+    const delete_icon = lib.element.icon("opacity-out-08 pointer",
       "18", "/images/icon/trash.png");
     header.append(delete_icon);
+
+    const action_icon = lib.element.icon("opacity-out-08 pointer",
+      "18", viewing_inactive ? "/images/icon/return.png" : "/images/icon/eye-closed.png");
+    action_icon.title = viewing_inactive ? "Reativar anotação" : "Inativar anotação";
+    header.append(action_icon);
+
+    const move_icon = noteMoveIcon();
+    header.append(move_icon);
+
+    lib.drag.element(note_div, async () => {
+      await updateNoteOrder(notes_box);
+    }, move_icon, "v");
+
+    lib.drag.drop(note_div, null, "drag-over", "v");
 
     const note_text = lib.element.create("textarea", {
       class: "box b1 height-80 lucida-grande rem08 border padding-5 wrap margin-top-5",
@@ -127,13 +191,51 @@
       note_text.dataset.initial_value = note_text.value.trim();
     });
 
+    action_icon.addEventListener("click", async () => {
+      const next_status = viewing_inactive ? "Ativo" : "Inativo";
+      const confirm_message = viewing_inactive
+        ? "Deseja reativar a anotação?"
+        : "Deseja inativar a anotação?";
+
+      lib.confirm(confirm_message, async r => {
+        if (!r) { return; }
+
+        const response = await API.response(Note.update, {
+          id: note.id,
+          status: next_status
+        });
+
+        if (!response || !response.done) { return; }
+
+        lib.message(response.done, async () => {
+          note_div.remove();
+          await updateNoteOrder(notes_box);
+
+          if (!notes_box.querySelector("[id^='note-']")) {
+            notes_box.innerHTML = "";
+            notes_box.append(lib.element.create("div", {
+              class: "box b1 lucida-grande bold padding-20 center opacity-out-08"
+            }, viewing_inactive ? "Nenhuma anotação inativa" : "Nenhuma anotação ativa"));
+          }
+        });
+      });
+    });
+
     delete_icon.addEventListener("click", async () => {
       lib.confirm("Deseja excluir a anotação?", async r => {
         if (r) { return; }
 
         const response = await API.response(Note.delete, note.id);
         lib.message(response, async () => {
-          await onRefresh();
+          note_div.remove();
+          await updateNoteOrder(notes_box);
+
+          if (!notes_box.querySelector("[id^='note-']")) {
+            notes_box.innerHTML = "";
+            notes_box.append(lib.element.create("div", {
+              class: "box b1 lucida-grande bold padding-20 center opacity-out-08"
+            }, viewing_inactive ? "Nenhuma anotação inativa" : "Nenhuma anotação ativa"));
+          }
         });
       }, "Não excluir", "Excluir anotação");
     });

@@ -1,0 +1,1250 @@
+<script>
+  const WHITEBOARD_STORAGE_KEY = "tasker-whiteboard";
+  const WHITEBOARD_LIST_KEY = "tasker-whiteboards";
+  const WHITEBOARD_MIN_ZOOM = 0.25;
+  const WHITEBOARD_MAX_ZOOM = 3;
+
+  function whiteboardCreateId() {
+    return `wb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  }
+
+  function whiteboardNormalizeBoard(board = {}) {
+    let items = board.items;
+    if (typeof board.canvas === "string") {
+      try {
+        const canvas = JSON.parse(board.canvas);
+        board = { ...board, ...canvas };
+        items = canvas.items;
+      } catch (error) { }
+    }
+
+    return {
+      id: board.id,
+      name: board.name || "Quadro sem nome",
+      description: board.description || "",
+      panX: Number.isFinite(board.panX) ? board.panX : 80,
+      panY: Number.isFinite(board.panY) ? board.panY : 80,
+      zoom: Number.isFinite(board.zoom) ? board.zoom : 1,
+      items: Array.isArray(items) ? items : (Array.isArray(board.items) ? board.items : [])
+    };
+  }
+
+  function whiteboardLocalBoards() {
+    try {
+      const data = JSON.parse(localStorage.getItem(WHITEBOARD_LIST_KEY) || "null");
+      if (data && Array.isArray(data.boards)) {
+        return data.boards.map(whiteboardNormalizeBoard);
+      }
+    } catch (error) { }
+
+    try {
+      const legacy = JSON.parse(localStorage.getItem(WHITEBOARD_STORAGE_KEY) || "null");
+      if (legacy && (Array.isArray(legacy.items) || Number.isFinite(legacy.panX))) {
+        return [whiteboardNormalizeBoard({
+          name: "Quadro 1",
+          description: "",
+          panX: legacy.panX,
+          panY: legacy.panY,
+          zoom: legacy.zoom,
+          items: legacy.items
+        })];
+      }
+    } catch (error) { }
+
+    return [];
+  }
+
+  function whiteboardClearLocal() {
+    localStorage.removeItem(WHITEBOARD_LIST_KEY);
+    localStorage.removeItem(WHITEBOARD_STORAGE_KEY);
+  }
+
+  async function whiteboardLoadBoards() {
+    const boards = await API.response(Whiteboard.filter, {});
+    return Array.isArray(boards) ? boards.map(whiteboardNormalizeBoard) : [];
+  }
+
+  async function whiteboardMigrateLocalBoards() {
+    const local_boards = whiteboardLocalBoards();
+    if (!local_boards.length) { return; }
+
+    const existing = await whiteboardLoadBoards();
+    if (existing.length) {
+      whiteboardClearLocal();
+      return;
+    }
+
+    for (const board of local_boards) {
+      await API.response(Whiteboard.create, {
+        name: board.name,
+        description: board.description,
+        canvas: {
+          panX: board.panX,
+          panY: board.panY,
+          zoom: board.zoom,
+          items: board.items
+        }
+      }, "none");
+    }
+
+    whiteboardClearLocal();
+  }
+
+  async function whiteboardSaveCanvas(board_id, canvas) {
+    await Whiteboard.update({
+      id: board_id,
+      canvas: {
+        panX: canvas.panX,
+        panY: canvas.panY,
+        zoom: canvas.zoom,
+        items: canvas.items
+      }
+    });
+  }
+
+  function whiteboardClampZoom(zoom) {
+    return Math.min(WHITEBOARD_MAX_ZOOM, Math.max(WHITEBOARD_MIN_ZOOM, zoom));
+  }
+
+  function whiteboardResizeTextRect(start, handle, point) {
+    const min_w = 64;
+    const min_h = 32;
+    let { x, y, width, height } = start;
+    const right = x + width;
+    const bottom = y + height;
+
+    if (handle.includes("e")) {
+      width = Math.max(min_w, point.x - x);
+    }
+    if (handle.includes("s")) {
+      height = Math.max(min_h, point.y - y);
+    }
+    if (handle.includes("w")) {
+      x = Math.min(point.x, right - min_w);
+      width = right - x;
+    }
+    if (handle.includes("n")) {
+      y = Math.min(point.y, bottom - min_h);
+      height = bottom - y;
+    }
+
+    return { x, y, width, height };
+  }
+
+  function whiteboardDistanceToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const length = (dx * dx) + (dy * dy);
+    if (!length) {
+      return Math.hypot(px - x1, py - y1);
+    }
+
+    let t = ((px - x1) * dx + (py - y1) * dy) / length;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+  }
+
+  async function whiteboardPopup() {
+    const popup = lib.element.create("div", {
+      class: "box b1 container whiteboard-list-popup padding-10"
+    });
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-10"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, "Quadros brancos"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/whiteboard.svg"
+    }));
+
+    const list_box = lib.element.create("div", {
+      class: "box b1 container whiteboard-list-box scroll-y-auto margin-bottom-10"
+    });
+    popup.append(list_box);
+
+    const form = lib.element.create("div", {
+      class: "box b1 container ground border padding-10"
+    });
+    popup.append(form);
+
+    const form_title = lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 margin-bottom-5"
+    }, "Novo quadro");
+    form.append(form_title);
+
+    const name_input = lib.element.create("input", {
+      class: "box b1 lucida-grande rem08 border padding-5 margin-bottom-5",
+      placeholder: "Nome do quadro"
+    });
+    form.append(name_input);
+
+    const description_input = lib.element.create("textarea", {
+      class: "box b1 height-80 lucida-grande rem08 border padding-5 wrap",
+      placeholder: "Descrição"
+    });
+    form.append(description_input);
+
+    const form_actions = lib.element.create("div", {
+      class: "box b1 container margin-top-5"
+    });
+    form.append(form_actions);
+
+    const save_button = lib.element.create("button", {
+      type: "button",
+      class: "box b4 btn-act lucida-grande bold noborder padding-10 pointer noselect"
+    }, "Salvar quadro");
+    form_actions.append(save_button);
+
+    const cancel_button = lib.element.create("button", {
+      type: "button",
+      class: "box b4 lucida-grande bold noborder padding-10 pointer noselect"
+    }, "Cancelar");
+    cancel_button.style.display = "none";
+    form_actions.append(cancel_button);
+
+    let editing_id = null;
+
+    const resetForm = () => {
+      editing_id = null;
+      form_title.textContent = "Novo quadro";
+      name_input.value = "";
+      description_input.value = "";
+      save_button.textContent = "Salvar quadro";
+      cancel_button.style.display = "none";
+    };
+
+    const renderList = async () => {
+      list_box.innerHTML = "";
+      const boards = await whiteboardLoadBoards();
+
+      if (!boards.length) {
+        list_box.append(lib.element.create("div", {
+          class: "box b1 lucida-grande bold padding-20 center opacity-out-08"
+        }, "Nenhum quadro criado"));
+        return;
+      }
+
+      boards.forEach(board => {
+        const item = lib.element.create("div", {
+          class: "box b1 container whiteboard-list-item ground border padding-5 margin-bottom-10"
+        });
+
+        const header = lib.element.create("div", {
+          class: "box b1 container"
+        });
+        item.append(header);
+
+        header.append(lib.element.create("div", {
+          class: "mobile-box b3 lucida-grande bold rem08 v-center"
+        }, board.name));
+
+        header.append(lib.element.create("div", {
+          class: "mobile-box b3 lucida-grande rem07 opacity-out-08 v-center wrap"
+        }, board.description || ""));
+
+        const edit_icon = lib.element.icon("b10 opacity-out-08 pointer v-center whiteboard-list-action",
+          "18", "/images/icon/edit.png");
+        header.append(edit_icon);
+
+        const delete_icon = lib.element.icon("b10 opacity-out-08 pointer v-center whiteboard-list-action",
+          "18", "/images/icon/trash.png");
+        header.append(delete_icon);
+
+        const openBoard = event => {
+          if (event.target.closest(".whiteboard-list-action")) { return; }
+          event.preventDefault();
+          event.stopPropagation();
+
+          setTimeout(async () => {
+            const current = await API.response(Whiteboard.find, board.id, "none");
+            if (!current) { return; }
+            lib.popup(whiteboardCanvasPopup(whiteboardNormalizeBoard(current)), () => renderList(), true);
+            const overlays = document.querySelectorAll(".msg");
+            const top = overlays[overlays.length - 1];
+            if (top) { top.style.zIndex = String(20 + overlays.length); }
+          }, 0);
+        };
+
+        item.addEventListener("click", openBoard);
+
+        edit_icon.addEventListener("click", event => {
+          event.stopPropagation();
+          editing_id = board.id;
+          form_title.textContent = "Editar quadro";
+          name_input.value = board.name;
+          description_input.value = board.description || "";
+          save_button.textContent = "Atualizar quadro";
+          cancel_button.style.display = "";
+          name_input.focus();
+        });
+
+        delete_icon.addEventListener("click", event => {
+          event.stopPropagation();
+          lib.confirm("Deseja excluir o quadro?", async r => {
+            if (!r) { return; }
+            const done = await API.response(Whiteboard.delete, board.id);
+            if (!done) { return; }
+            if (editing_id === board.id) { resetForm(); }
+            await renderList();
+          });
+        });
+
+        list_box.append(item);
+      });
+    };
+
+    save_button.addEventListener("click", async () => {
+      const name = name_input.value.trim();
+      const description = description_input.value.trim();
+
+      if (!name) {
+        return lib.message("O nome do quadro não pode ser vazio.");
+      }
+
+      let response;
+      if (editing_id) {
+        response = await API.response(Whiteboard.update, {
+          id: editing_id,
+          name,
+          description
+        });
+      } else {
+        response = await API.response(Whiteboard.create, { name, description });
+      }
+
+      if (!response) { return; }
+
+      resetForm();
+      await renderList();
+    });
+
+    cancel_button.addEventListener("click", resetForm);
+
+    await whiteboardMigrateLocalBoards();
+    await renderList();
+    return popup;
+  }
+
+  function whiteboardCanvasPopup(board) {
+    const state = {
+      panX: board.panX,
+      panY: board.panY,
+      zoom: board.zoom,
+      items: board.items
+    };
+    let tool = "pan";
+    let selected_id = null;
+    let editing_id = null;
+    let interaction = null;
+    let persist_timer = null;
+
+    const popup = lib.element.create("div", {
+      class: "box b1 container whiteboard-popup padding-10"
+    });
+
+    const title_box = lib.element.create("div", {
+      class: "mobile-box container center margin-bottom-5"
+    });
+    popup.append(title_box);
+
+    title_box.append(lib.element.create("div", {
+      class: "mobile-box lucida-grande bold rem09 padding-5 v-center"
+    }, board.name || "Quadro branco"));
+
+    title_box.append(lib.element.create("img", {
+      class: "image-prop size-25",
+      src: "/images/icon/whiteboard.svg"
+    }));
+
+    const toolbar = lib.element.create("div", {
+      class: "box b1 container whiteboard-toolbar margin-bottom-5"
+    });
+    popup.append(toolbar);
+
+    const tools_box = lib.element.create("div", {
+      class: "mobile-box container"
+    });
+    toolbar.append(tools_box);
+
+    const arrow_btn = lib.element.create("button", {
+      type: "button",
+      class: "whiteboard-tool lucida-grande rem08",
+      title: "Criar seta"
+    }, "Seta");
+    tools_box.append(arrow_btn);
+
+    const zoom_box = lib.element.create("div", {
+      class: "mobile-box container"
+    });
+    toolbar.append(zoom_box);
+
+    const zoom_out_btn = lib.element.create("button", {
+      type: "button",
+      class: "whiteboard-zoom-btn lucida-grande bold rem10",
+      title: "Afastar"
+    }, "−");
+    zoom_box.append(zoom_out_btn);
+
+    const zoom_label = lib.element.create("div", {
+      class: "mobile-box whiteboard-zoom-label lucida-grande rem08 v-center"
+    }, "100%");
+    zoom_box.append(zoom_label);
+
+    const zoom_in_btn = lib.element.create("button", {
+      type: "button",
+      class: "whiteboard-zoom-btn lucida-grande bold rem10",
+      title: "Aproximar"
+    }, "+");
+    zoom_box.append(zoom_in_btn);
+
+    const viewport = lib.element.create("div", {
+      class: "box b1 whiteboard-viewport"
+    });
+    popup.append(viewport);
+
+    const world = lib.element.create("div", {
+      class: "whiteboard-world"
+    });
+    viewport.append(world);
+
+    popup.append(lib.element.create("div", {
+      class: "box b1 lucida-grande rem07 padding-5 whiteboard-hint"
+    }, "Dois cliques no quadro criam um texto. Dois cliques no texto para escrever. Arraste para mover."));
+
+    const persist = () => {
+      clearTimeout(persist_timer);
+      persist_timer = setTimeout(() => whiteboardSaveCanvas(board.id, state), 400);
+    };
+
+    const applyTransform = () => {
+      world.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+      world.style.setProperty("--wb-zoom", String(state.zoom));
+      const grid = 28 * state.zoom;
+      viewport.style.backgroundSize = `${grid}px ${grid}px`;
+      viewport.style.backgroundPosition = `${state.panX}px ${state.panY}px`;
+      zoom_label.textContent = `${Math.round(state.zoom * 100)}%`;
+    };
+
+    const setTool = (next_tool) => {
+      tool = next_tool;
+      arrow_btn.classList.toggle("is-active", tool === "arrow");
+      viewport.classList.toggle("is-arrow", tool === "arrow");
+    };
+
+    const screenToWorld = (clientX, clientY) => {
+      const rect = viewport.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - state.panX) / state.zoom,
+        y: (clientY - rect.top - state.panY) / state.zoom
+      };
+    };
+
+    const findItem = (id) => state.items.find(item => item.id === id);
+
+    const hitTest = (x, y) => {
+      for (let i = state.items.length - 1; i >= 0; i--) {
+        const item = state.items[i];
+        if (item.type === "text") {
+          const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"]`);
+          if (!node) { continue; }
+          const width = item.width || node.offsetWidth;
+          const height = item.height || node.offsetHeight;
+          if (x >= item.x && x <= item.x + width && y >= item.y && y <= item.y + height) {
+            return item;
+          }
+        }
+
+        if (item.type === "arrow") {
+          if (whiteboardDistanceToSegment(x, y, item.x1, item.y1, item.x2, item.y2) <= 10 / state.zoom) {
+            return item;
+          }
+        }
+      }
+
+      return null;
+    };
+
+    const stopEditing = () => {
+      if (!editing_id) { return; }
+      const item = findItem(editing_id);
+      const node = world.querySelector(`.whiteboard-text-box[data-id="${editing_id}"] .whiteboard-text`);
+      if (item && node) {
+        item.text = (node.textContent || "").trim();
+        node.contentEditable = "false";
+        node.classList.remove("is-editing");
+      }
+      editing_id = null;
+      persist();
+    };
+
+    const startEditing = (item) => {
+      stopEditing();
+      selected_id = item.id;
+      editing_id = item.id;
+      renderItems();
+      const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`);
+      if (!node) { return; }
+      node.contentEditable = "true";
+      node.classList.add("is-editing");
+      node.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+
+    const arrowBox = (item) => {
+      const pad = 28;
+      const left = Math.min(item.x1, item.x2) - pad;
+      const top = Math.min(item.y1, item.y2) - pad;
+      return {
+        left,
+        top,
+        width: Math.abs(item.x2 - item.x1) + (pad * 2),
+        height: Math.abs(item.y2 - item.y1) + (pad * 2)
+      };
+    };
+
+    const renderArrow = (item) => {
+      const box = arrowBox(item);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", `whiteboard-arrow${selected_id === item.id ? " is-selected" : ""}`);
+      svg.setAttribute("data-id", item.id);
+      svg.style.left = `${box.left}px`;
+      svg.style.top = `${box.top}px`;
+      svg.style.width = `${box.width}px`;
+      svg.style.height = `${box.height}px`;
+      svg.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+
+      const marker_id = `whiteboard-head-${item.id}`;
+      svg.innerHTML = `
+        <defs>
+          <marker id="${marker_id}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="${selected_id === item.id ? "#3b6ea5" : "#222"}"></polygon>
+          </marker>
+        </defs>
+        <line class="whiteboard-arrow-hit" x1="${item.x1 - box.left}" y1="${item.y1 - box.top}" x2="${item.x2 - box.left}" y2="${item.y2 - box.top}" stroke="transparent" stroke-width="16"></line>
+        <line class="whiteboard-arrow-line" x1="${item.x1 - box.left}" y1="${item.y1 - box.top}" x2="${item.x2 - box.left}" y2="${item.y2 - box.top}" stroke="${selected_id === item.id ? "#3b6ea5" : "#222"}" stroke-width="2.6" stroke-linecap="round" marker-end="url(#${marker_id})"></line>
+      `;
+
+      return svg;
+    };
+
+    const renderDeleteButton = (item, host, position) => {
+      const button = lib.element.create("div", {
+        class: `whiteboard-delete${item.type === "arrow" ? " whiteboard-delete-arrow" : ""}`,
+        "data-id": item.id,
+        "data-kind": "delete",
+        title: "Excluir"
+      });
+      const svg_wrap = document.createElement("div");
+      svg_wrap.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+      button.append(svg_wrap.querySelector("svg"));
+      if (position) {
+        button.style.left = `${position.x}px`;
+        button.style.top = `${position.y}px`;
+      }
+      host.append(button);
+    };
+
+    const renderHandles = (item) => {
+      const fragment = document.createDocumentFragment();
+      ["start", "end"].forEach(handle => {
+        const button = lib.element.create("div", {
+          class: "whiteboard-handle whiteboard-arrow-handle",
+          "data-id": item.id,
+          "data-kind": "arrow",
+          "data-handle": handle
+        });
+        button.style.left = `${handle === "start" ? item.x1 : item.x2}px`;
+        button.style.top = `${handle === "start" ? item.y1 : item.y2}px`;
+        fragment.append(button);
+      });
+      return fragment;
+    };
+
+    const renderTextHandles = (box, item) => {
+      ["n", "s", "e", "w", "ne", "nw", "se", "sw"].forEach(handle => {
+        box.append(lib.element.create("div", {
+          class: "whiteboard-handle whiteboard-text-handle",
+          "data-id": item.id,
+          "data-kind": "text",
+          "data-handle": handle
+        }));
+      });
+    };
+
+    const applyTextStyle = (item, node) => {
+      node.style.fontSize = `${item.fontSize || 30}px`;
+      node.style.fontWeight = item.bold ? "700" : "400";
+    };
+
+    const changeFontSize = (item, delta) => {
+      item.fontSize = Math.min(72, Math.max(10, (item.fontSize || 30) + delta));
+      const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`);
+      const label = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-font-size-label`);
+      if (node) { applyTextStyle(item, node); }
+      if (label) { label.textContent = String(item.fontSize); }
+      persist();
+    };
+
+    const toggleBold = (item) => {
+      item.bold = !item.bold;
+      const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`);
+      const button = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-bold-btn`);
+      if (node) { applyTextStyle(item, node); }
+      if (button) { button.classList.toggle("is-active", item.bold); }
+      persist();
+    };
+
+    const renderTextToolbar = (box, item) => {
+      const toolbar = lib.element.create("div", {
+        class: "whiteboard-text-toolbar",
+        "data-id": item.id
+      });
+
+      const smaller = lib.element.create("button", {
+        type: "button",
+        class: "whiteboard-toolbar-btn lucida-grande bold",
+        title: "Diminuir fonte"
+      }, "A−");
+      toolbar.append(smaller);
+
+      toolbar.append(lib.element.create("div", {
+        class: "whiteboard-font-size-label lucida-grande"
+      }, String(item.fontSize || 30)));
+
+      const larger = lib.element.create("button", {
+        type: "button",
+        class: "whiteboard-toolbar-btn lucida-grande bold",
+        title: "Aumentar fonte"
+      }, "A+");
+      toolbar.append(larger);
+
+      const bold_btn = lib.element.create("button", {
+        type: "button",
+        class: `whiteboard-toolbar-btn whiteboard-bold-btn lucida-grande bold${item.bold ? " is-active" : ""}`,
+        title: "Negrito"
+      }, "B");
+      toolbar.append(bold_btn);
+
+      const stop = event => {
+        event.stopPropagation();
+        event.preventDefault();
+      };
+
+      smaller.addEventListener("pointerdown", event => {
+        stop(event);
+        changeFontSize(item, -2);
+      });
+      larger.addEventListener("pointerdown", event => {
+        stop(event);
+        changeFontSize(item, 2);
+      });
+      bold_btn.addEventListener("pointerdown", event => {
+        stop(event);
+        toggleBold(item);
+      });
+
+      renderDeleteButton(item, toolbar);
+      box.append(toolbar);
+    };
+
+    const renderItems = () => {
+      world.innerHTML = "";
+
+      state.items.forEach(item => {
+        if (item.type === "arrow") {
+          world.append(renderArrow(item));
+          if (selected_id === item.id) {
+            world.append(renderHandles(item));
+            renderDeleteButton(item, world, {
+              x: (item.x1 + item.x2) / 2,
+              y: Math.min(item.y1, item.y2) - 10
+            });
+          }
+          return;
+        }
+
+        const box = lib.element.create("div", {
+          class: `whiteboard-text-box${item.width || item.height ? " has-size" : ""}`,
+          "data-id": item.id
+        });
+        box.style.left = `${item.x}px`;
+        box.style.top = `${item.y}px`;
+        if (item.width) { box.style.width = `${item.width}px`; }
+        if (item.height) { box.style.height = `${item.height}px`; }
+
+        const node = lib.element.create("div", {
+          class: `whiteboard-text lucida-grande${selected_id === item.id ? " is-selected" : ""}`
+        });
+        node.textContent = item.text || "";
+        applyTextStyle(item, node);
+        node.addEventListener("input", () => {
+          item.text = node.textContent || "";
+          persist();
+        });
+        box.append(node);
+
+        if (selected_id === item.id) {
+          renderTextHandles(box, item);
+          renderTextToolbar(box, item);
+        }
+
+        world.append(box);
+      });
+    };
+
+    const syncTextBox = (item) => {
+      const box = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"]`);
+      if (!box) { return; }
+      box.style.left = `${item.x}px`;
+      box.style.top = `${item.y}px`;
+      if (item.width) {
+        box.classList.add("has-size");
+        box.style.width = `${item.width}px`;
+      }
+      if (item.height) {
+        box.classList.add("has-size");
+        box.style.height = `${item.height}px`;
+      }
+    };
+
+    const syncArrow = (item) => {
+      const box = arrowBox(item);
+      const svg = world.querySelector(`svg.whiteboard-arrow[data-id="${item.id}"]`);
+      if (svg) {
+        svg.style.left = `${box.left}px`;
+        svg.style.top = `${box.top}px`;
+        svg.style.width = `${box.width}px`;
+        svg.style.height = `${box.height}px`;
+        svg.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+        svg.querySelectorAll("line").forEach(line => {
+          line.setAttribute("x1", String(item.x1 - box.left));
+          line.setAttribute("y1", String(item.y1 - box.top));
+          line.setAttribute("x2", String(item.x2 - box.left));
+          line.setAttribute("y2", String(item.y2 - box.top));
+        });
+      }
+
+      world.querySelectorAll(`.whiteboard-arrow-handle[data-id="${item.id}"]`).forEach(handle => {
+        const is_start = handle.dataset.handle === "start";
+        handle.style.left = `${is_start ? item.x1 : item.x2}px`;
+        handle.style.top = `${is_start ? item.y1 : item.y2}px`;
+      });
+
+      const trash = world.querySelector(`.whiteboard-delete-arrow[data-id="${item.id}"]`);
+      if (trash) {
+        trash.style.left = `${(item.x1 + item.x2) / 2}px`;
+        trash.style.top = `${Math.min(item.y1, item.y2) - 10}px`;
+      }
+    };
+
+    const zoomAt = (clientX, clientY, next_zoom, should_persist = true) => {
+      const rect = viewport.getBoundingClientRect();
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      const world_x = (mx - state.panX) / state.zoom;
+      const world_y = (my - state.panY) / state.zoom;
+      state.zoom = whiteboardClampZoom(next_zoom);
+      state.panX = mx - (world_x * state.zoom);
+      state.panY = my - (world_y * state.zoom);
+      applyTransform();
+      if (should_persist) { persist(); }
+    };
+
+    const deleteSelected = () => {
+      if (!selected_id) { return; }
+      stopEditing();
+      state.items = state.items.filter(item => item.id !== selected_id);
+      selected_id = null;
+      renderItems();
+      persist();
+    };
+
+    arrow_btn.addEventListener("click", () => {
+      stopEditing();
+      setTool(tool === "arrow" ? "pan" : "arrow");
+    });
+
+    zoom_in_btn.addEventListener("click", () => {
+      const rect = viewport.getBoundingClientRect();
+      zoomAt(rect.left + (rect.width / 2), rect.top + (rect.height / 2), state.zoom * 1.15);
+    });
+
+    zoom_out_btn.addEventListener("click", () => {
+      const rect = viewport.getBoundingClientRect();
+      zoomAt(rect.left + (rect.width / 2), rect.top + (rect.height / 2), state.zoom / 1.15);
+    });
+
+    viewport.addEventListener("wheel", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const factor = event.deltaY < 0 ? 1.12 : (1 / 1.12);
+      zoomAt(event.clientX, event.clientY, state.zoom * factor);
+    }, { passive: false });
+
+    const DRAG_THRESHOLD = 4;
+    const DOUBLE_CLICK_MS = 400;
+    let last_click = { time: 0, id: null, x: 0, y: 0 };
+    let follow_touch = false;
+    let pinch = null;
+
+    const touchDistance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+    const beginPinch = (touches) => {
+      last_click = { time: 0, id: null, x: 0, y: 0 };
+      if (interaction) {
+        if (interaction.type === "draw-arrow") {
+          const item = findItem(interaction.id);
+          if (item && Math.hypot(item.x2 - item.x1, item.y2 - item.y1) < 24) {
+            state.items = state.items.filter(entry => entry.id !== item.id);
+            selected_id = null;
+            renderItems();
+          }
+        }
+        interaction = null;
+        viewport.classList.remove("is-panning");
+      }
+      pinch = {
+        startDist: Math.max(touchDistance(touches[0], touches[1]), 1),
+        startZoom: state.zoom
+      };
+    };
+
+    const applyPinch = (touches) => {
+      if (!pinch || touches.length < 2) { return; }
+      const dist = touchDistance(touches[0], touches[1]);
+      const mid_x = (touches[0].clientX + touches[1].clientX) / 2;
+      const mid_y = (touches[0].clientY + touches[1].clientY) / 2;
+      zoomAt(mid_x, mid_y, pinch.startZoom * (dist / pinch.startDist), false);
+    };
+
+    const endPinch = () => {
+      if (!pinch) { return; }
+      pinch = null;
+      persist();
+    };
+
+    const locked_ancestors = [];
+
+    const lockScrollAncestors = () => {
+      locked_ancestors.length = 0;
+      let node = popup;
+      while (node && node !== document.body) {
+        locked_ancestors.push({
+          node,
+          overflow: node.style.overflow,
+          touchAction: node.style.touchAction,
+          overscrollBehavior: node.style.overscrollBehavior,
+          webkitOverflowScrolling: node.style.webkitOverflowScrolling
+        });
+        node.style.overflow = "hidden";
+        node.style.touchAction = "none";
+        node.style.overscrollBehavior = "none";
+        node.style.webkitOverflowScrolling = "auto";
+        node = node.parentElement;
+      }
+    };
+
+    const unlockScrollAncestors = () => {
+      locked_ancestors.forEach(entry => {
+        entry.node.style.overflow = entry.overflow;
+        entry.node.style.touchAction = entry.touchAction;
+        entry.node.style.overscrollBehavior = entry.overscrollBehavior;
+        entry.node.style.webkitOverflowScrolling = entry.webkitOverflowScrolling;
+      });
+      locked_ancestors.length = 0;
+    };
+
+    const cleanupCanvasPopup = () => {
+      unbindTouchFollow();
+      unlockScrollAncestors();
+      pinch = null;
+      interaction = null;
+    };
+
+    const watchCanvasPopupClose = () => {
+      const overlay = popup.closest(".msg");
+      if (!overlay) { return; }
+      const observer = new MutationObserver(() => {
+        if (document.body.contains(overlay)) { return; }
+        observer.disconnect();
+        cleanupCanvasPopup();
+      });
+      observer.observe(document.body, { childList: true });
+    };
+
+    const applyDragMove = (clientX, clientY) => {
+      if (!interaction) { return; }
+
+      if (interaction.type === "pan" || interaction.type === "move-item") {
+        if (!interaction.started) {
+          const distance = Math.hypot(clientX - interaction.originX, clientY - interaction.originY);
+          if (distance < DRAG_THRESHOLD) { return; }
+          interaction.started = true;
+          last_click = { time: 0, id: null, x: 0, y: 0 };
+          if (interaction.type === "pan") {
+            viewport.classList.add("is-panning");
+          }
+        }
+      }
+
+      if (interaction.type === "pan") {
+        state.panX += clientX - interaction.lastX;
+        state.panY += clientY - interaction.lastY;
+        interaction.lastX = clientX;
+        interaction.lastY = clientY;
+        applyTransform();
+        return;
+      }
+
+      const world_point = screenToWorld(clientX, clientY);
+
+      if (interaction.type === "move-item") {
+        const item = findItem(interaction.id);
+        if (!item) { return; }
+        const dx = world_point.x - interaction.lastX;
+        const dy = world_point.y - interaction.lastY;
+        if (item.type === "text") {
+          item.x += dx;
+          item.y += dy;
+          syncTextBox(item);
+        } else {
+          item.x1 += dx;
+          item.y1 += dy;
+          item.x2 += dx;
+          item.y2 += dy;
+          syncArrow(item);
+        }
+        interaction.lastX = world_point.x;
+        interaction.lastY = world_point.y;
+        return;
+      }
+
+      if (interaction.type === "resize-text") {
+        const item = findItem(interaction.id);
+        if (!item) { return; }
+        const next = whiteboardResizeTextRect(interaction, interaction.handle, world_point);
+        item.x = next.x;
+        item.y = next.y;
+        item.width = next.width;
+        item.height = next.height;
+        syncTextBox(item);
+        return;
+      }
+
+      if (interaction.type === "draw-arrow" || interaction.type === "resize-arrow") {
+        const item = findItem(interaction.type === "draw-arrow" ? interaction.id : selected_id);
+        if (!item) { return; }
+        if (interaction.type === "draw-arrow" || interaction.handle === "end") {
+          item.x2 = world_point.x;
+          item.y2 = world_point.y;
+        } else {
+          item.x1 = world_point.x;
+          item.y1 = world_point.y;
+        }
+        syncArrow(item);
+      }
+    };
+
+    const finishDrag = () => {
+      const ended = interaction;
+
+      if (ended?.type === "draw-arrow") {
+        const item = findItem(ended.id);
+        if (item && Math.hypot(item.x2 - item.x1, item.y2 - item.y1) < 8) {
+          state.items = state.items.filter(entry => entry.id !== item.id);
+          selected_id = null;
+        }
+        setTool("pan");
+      }
+
+      viewport.classList.remove("is-panning");
+      interaction = null;
+      unbindTouchFollow();
+
+      if (!ended) { return; }
+
+      if (ended.type === "move-item" || ended.type === "resize-text" || ended.type === "pan" || ended.type === "draw-arrow" || ended.type === "resize-arrow") {
+        if (ended.type !== "pan") { renderItems(); }
+        persist();
+      }
+    };
+
+    const onDocTouchMove = event => {
+      if (viewport.contains(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (event.touches.length >= 2) {
+        if (!pinch) { beginPinch(event.touches); }
+        applyPinch(event.touches);
+        return;
+      }
+      if (pinch) { endPinch(); }
+      if (!interaction) { return; }
+      const touch = event.touches[0];
+      if (touch) { applyDragMove(touch.clientX, touch.clientY); }
+    };
+
+    const onDocTouchEnd = event => {
+      if (viewport.contains(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (event.touches.length >= 2) { return; }
+      if (event.touches.length === 1) {
+        if (pinch) { endPinch(); }
+        const touch = event.touches[0];
+        if (interaction && touch) {
+          interaction.lastX = interaction.type === "pan" ? touch.clientX : screenToWorld(touch.clientX, touch.clientY).x;
+          interaction.lastY = interaction.type === "pan" ? touch.clientY : screenToWorld(touch.clientX, touch.clientY).y;
+          interaction.originX = touch.clientX;
+          interaction.originY = touch.clientY;
+          interaction.started = true;
+        }
+        return;
+      }
+      if (pinch) { endPinch(); }
+      finishDrag();
+    };
+
+    const bindTouchFollow = () => {
+      if (follow_touch) { return; }
+      follow_touch = true;
+      document.addEventListener("touchmove", onDocTouchMove, { passive: false, capture: true });
+      document.addEventListener("touchend", onDocTouchEnd, { passive: false, capture: true });
+      document.addEventListener("touchcancel", onDocTouchEnd, { passive: false, capture: true });
+    };
+
+    const unbindTouchFollow = () => {
+      if (!follow_touch) { return; }
+      follow_touch = false;
+      document.removeEventListener("touchmove", onDocTouchMove, { capture: true });
+      document.removeEventListener("touchend", onDocTouchEnd, { capture: true });
+      document.removeEventListener("touchcancel", onDocTouchEnd, { capture: true });
+    };
+
+    const capturePointer = event => {
+      if (event.pointerType === "touch") {
+        bindTouchFollow();
+        return;
+      }
+      try { viewport.setPointerCapture(event.pointerId); } catch (error) { }
+    };
+
+    const createTextAt = (world_point) => {
+      const item = {
+        id: whiteboardCreateId(),
+        type: "text",
+        x: world_point.x,
+        y: world_point.y,
+        text: ""
+      };
+      state.items.push(item);
+      selected_id = item.id;
+      persist();
+      startEditing(item);
+      return item;
+    };
+
+    viewport.addEventListener("touchstart", event => {
+      if (event.touches.length < 2) { return; }
+      event.preventDefault();
+      beginPinch(event.touches);
+      bindTouchFollow();
+    }, { passive: false });
+
+    viewport.addEventListener("pointerdown", event => {
+      if (pinch || (event.pointerType === "touch" && event.isPrimary === false)) {
+        event.preventDefault();
+        return;
+      }
+      if (event.pointerType === "touch" && interaction) {
+        event.preventDefault();
+        bindTouchFollow();
+        return;
+      }
+      if (event.button !== 0 && event.button !== 1) { return; }
+
+      const delete_btn = event.target.closest(".whiteboard-delete");
+      const handle = event.target.closest(".whiteboard-handle");
+      const world_point = screenToWorld(event.clientX, event.clientY);
+      const hit = handle || delete_btn ? findItem(selected_id) : hitTest(world_point.x, world_point.y);
+
+      if (delete_btn) {
+        selected_id = delete_btn.dataset.id;
+        last_click = { time: 0, id: null, x: 0, y: 0 };
+        deleteSelected();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if (event.target.closest(".whiteboard-text-toolbar")) {
+        event.stopPropagation();
+        return;
+      }
+
+      if (event.target.closest(".whiteboard-text.is-editing")) {
+        return;
+      }
+
+      if (editing_id && hit?.id !== editing_id) {
+        stopEditing();
+      }
+
+      if (handle) {
+        last_click = { time: 0, id: null, x: 0, y: 0 };
+        selected_id = handle.dataset.id;
+        stopEditing();
+        if (handle.dataset.kind === "text") {
+          const box = world.querySelector(`.whiteboard-text-box[data-id="${selected_id}"]`);
+          const item = findItem(selected_id);
+          interaction = {
+            type: "resize-text",
+            handle: handle.dataset.handle,
+            id: selected_id,
+            pointer_id: event.pointerId,
+            x: item.x,
+            y: item.y,
+            width: item.width || box.offsetWidth,
+            height: item.height || box.offsetHeight
+          };
+        } else {
+          interaction = {
+            type: "resize-arrow",
+            handle: handle.dataset.handle,
+            pointer_id: event.pointerId
+          };
+        }
+        capturePointer(event);
+        event.preventDefault();
+        return;
+      }
+
+      if (event.button === 0 && tool !== "arrow") {
+        const click_id = hit?.type === "text" ? hit.id : (!hit ? "board" : null);
+        if (click_id) {
+          const now = Date.now();
+          const is_double = last_click.id === click_id
+            && (now - last_click.time) <= DOUBLE_CLICK_MS
+            && Math.hypot(event.clientX - last_click.x, event.clientY - last_click.y) <= 8;
+          last_click = { time: now, id: click_id, x: event.clientX, y: event.clientY };
+
+          if (is_double) {
+            if (click_id === "board") {
+              createTextAt(world_point);
+            } else {
+              startEditing(hit);
+            }
+            event.preventDefault();
+            return;
+          }
+        }
+      }
+
+      if (tool === "arrow" && event.button === 0) {
+        const item = {
+          id: whiteboardCreateId(),
+          type: "arrow",
+          x1: world_point.x,
+          y1: world_point.y,
+          x2: world_point.x,
+          y2: world_point.y
+        };
+        state.items.push(item);
+        selected_id = item.id;
+        interaction = {
+          type: "draw-arrow",
+          id: item.id,
+          pointer_id: event.pointerId
+        };
+        renderItems();
+        capturePointer(event);
+        event.preventDefault();
+        return;
+      }
+
+      if (hit && event.button === 0) {
+        selected_id = hit.id;
+        const selected_node = world.querySelector(`.whiteboard-text-box[data-id="${hit.id}"] .whiteboard-text`);
+        if (selected_node) { selected_node.classList.add("is-selected"); }
+        interaction = {
+          type: "move-item",
+          id: hit.id,
+          pointer_id: event.pointerId,
+          lastX: world_point.x,
+          lastY: world_point.y,
+          originX: event.clientX,
+          originY: event.clientY,
+          started: false
+        };
+      } else {
+        selected_id = null;
+        renderItems();
+        interaction = {
+          type: "pan",
+          pointer_id: event.pointerId,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          originX: event.clientX,
+          originY: event.clientY,
+          started: false
+        };
+      }
+      capturePointer(event);
+      event.preventDefault();
+    }, { passive: false });
+
+    viewport.addEventListener("pointermove", event => {
+      if (!interaction || event.pointerType === "touch") { return; }
+      if (interaction.pointer_id !== event.pointerId) { return; }
+      event.preventDefault();
+      applyDragMove(event.clientX, event.clientY);
+    }, { passive: false });
+
+    viewport.addEventListener("pointerup", event => {
+      if (event.pointerType === "touch") { return; }
+      if (!interaction || interaction.pointer_id !== event.pointerId) { return; }
+      finishDrag();
+    });
+
+    viewport.addEventListener("pointercancel", event => {
+      if (event.pointerType === "touch") { return; }
+      if (!interaction || interaction.pointer_id !== event.pointerId) { return; }
+      finishDrag();
+    });
+
+    popup.addEventListener("keydown", event => {
+      if ((event.key === "Delete" || event.key === "Backspace") && selected_id && !editing_id) {
+        event.preventDefault();
+        deleteSelected();
+      }
+      if (event.key === "Escape" && editing_id) {
+        event.preventDefault();
+        stopEditing();
+      }
+    });
+
+    setTool("pan");
+    applyTransform();
+    renderItems();
+
+    requestAnimationFrame(() => {
+      lockScrollAncestors();
+      popup.style.touchAction = "none";
+      watchCanvasPopupClose();
+    });
+
+    return popup;
+  }
+</script>

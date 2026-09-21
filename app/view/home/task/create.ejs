@@ -176,7 +176,8 @@
 
       let task = {
         milestone_id: milestone_select.value ? milestone_select.value : null,
-        description: description.value
+        description: description.value,
+        sort_order: await nextTaskSortOrder("Pendente")
       };
 
       let response = await API.response(Task.create, task);
