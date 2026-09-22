@@ -414,7 +414,7 @@
     };
     let tool = "pan";
     let selected_id = null;
-    let selected_cell = null;
+    let selected_cells = [];
     let editing_id = null;
     let editing_cell = null;
     let interaction = null;
@@ -610,7 +610,7 @@
           row: Math.max(0, Math.min(item.rows - 1, cell?.row || 0)),
           col: Math.max(0, Math.min(item.cols - 1, cell?.col || 0))
         };
-        selected_cell = { ...editing_cell };
+        selected_cells = [{ ...editing_cell }];
         renderItems();
         focusEditable(world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${editing_cell.row}"][data-col="${editing_cell.col}"] .whiteboard-sheet-cell-text`));
         return;
@@ -699,25 +699,34 @@
       node.style.fontWeight = style.bold ? "700" : "400";
     };
 
-    const changeCellFontSize = (item, row, col, delta) => {
-      const style = cellStyleAt(item, row, col);
-      style.fontSize = Math.min(72, Math.max(12, style.fontSize + delta));
-      const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${row}"][data-col="${col}"]`);
+    const changeCellFontSize = (item, delta) => {
+      const primary = selected_cells[selected_cells.length - 1];
+      if (!primary) { return; }
+      const next_size = Math.min(72, Math.max(12, cellStyleAt(item, primary.row, primary.col).fontSize + delta));
+      selected_cells.forEach(entry => {
+        const style = cellStyleAt(item, entry.row, entry.col);
+        style.fontSize = next_size;
+        const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${entry.row}"][data-col="${entry.col}"]`);
+        if (node) { applyCellStyle(style, node); }
+      });
       const toolbar = world.querySelector(`.whiteboard-sheet-cell-toolbar[data-id="${item.id}"]`);
       const label = toolbar?.querySelector(".whiteboard-font-size-label");
-      if (node) { applyCellStyle(style, node); }
-      if (label) { label.textContent = String(style.fontSize); }
+      if (label) { label.textContent = String(next_size); }
       persist();
     };
 
-    const toggleCellBold = (item, row, col) => {
-      const style = cellStyleAt(item, row, col);
-      style.bold = !style.bold;
-      const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${row}"][data-col="${col}"]`);
+    const toggleCellBold = (item) => {
+      const primary = selected_cells[selected_cells.length - 1];
+      const next_bold = primary ? !cellStyleAt(item, primary.row, primary.col).bold : true;
+      selected_cells.forEach(entry => {
+        const style = cellStyleAt(item, entry.row, entry.col);
+        style.bold = next_bold;
+        const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${entry.row}"][data-col="${entry.col}"]`);
+        if (node) { applyCellStyle(style, node); }
+      });
       const toolbar = world.querySelector(`.whiteboard-sheet-cell-toolbar[data-id="${item.id}"]`);
       const button = toolbar?.querySelector(".whiteboard-bold-btn");
-      if (node) { applyCellStyle(style, node); }
-      if (button) { button.classList.toggle("is-active", style.bold); }
+      if (button) { button.classList.toggle("is-active", next_bold); }
       persist();
     };
 
@@ -762,15 +771,15 @@
 
       smaller.addEventListener("pointerdown", event => {
         stop(event);
-        changeCellFontSize(item, row, col, -2);
+        changeCellFontSize(item, -2);
       });
       larger.addEventListener("pointerdown", event => {
         stop(event);
-        changeCellFontSize(item, row, col, 2);
+        changeCellFontSize(item, 2);
       });
       bold_btn.addEventListener("pointerdown", event => {
         stop(event);
-        toggleCellBold(item, row, col);
+        toggleCellBold(item);
       });
 
       host.append(toolbar);
@@ -868,9 +877,7 @@
         row.forEach((value, col_index) => {
           const style = whiteboardCellData(value);
           const active = selected_id === item.id
-            && selected_cell
-            && selected_cell.row === row_index
-            && selected_cell.col === col_index;
+            && selected_cells.some(entry => entry.row === row_index && entry.col === col_index);
           const cell = lib.element.create("div", {
             class: `whiteboard-sheet-cell lucida-grande${active ? " is-active" : ""}`,
             "data-id": item.id,
@@ -952,13 +959,17 @@
       });
       frame.append(remove_row);
 
-      if (selected_id === item.id && selected_cell) {
-        const col = Math.min(selected_cell.col, item.cols - 1);
-        const row = Math.min(selected_cell.row, item.rows - 1);
-        selected_cell = { row, col };
-        const x = item.colWidths.slice(0, col).reduce((sum, width) => sum + width, 0) + (item.colWidths[col] / 2);
-        const y = item.rowHeights.slice(0, row).reduce((sum, height) => sum + height, 0);
-        renderCellToolbar(frame, item, row, col, x, y);
+      if (selected_id === item.id && selected_cells.length) {
+        selected_cells = selected_cells
+          .map(entry => ({
+            row: Math.min(entry.row, item.rows - 1),
+            col: Math.min(entry.col, item.cols - 1)
+          }))
+          .filter((entry, index, list) => list.findIndex(other => other.row === entry.row && other.col === entry.col) === index);
+        const primary = selected_cells[selected_cells.length - 1];
+        const x = item.colWidths.slice(0, primary.col).reduce((sum, width) => sum + width, 0) + (item.colWidths[primary.col] / 2);
+        const y = item.rowHeights.slice(0, primary.row).reduce((sum, height) => sum + height, 0);
+        renderCellToolbar(frame, item, primary.row, primary.col, x, y);
       }
 
       if (selected_id === item.id) {
@@ -1246,7 +1257,7 @@
       stopEditing();
       state.items = state.items.filter(item => item.id !== selected_id);
       selected_id = null;
-      selected_cell = null;
+      selected_cells = [];
       renderItems();
       persist();
     };
@@ -1691,7 +1702,7 @@
         return;
       }
 
-      if (event.button === 0 && tool !== "arrow" && tool !== "sheet") {
+      if (event.button === 0 && tool !== "arrow" && tool !== "sheet" && !event.ctrlKey && !event.metaKey) {
         const click_id = (hit?.type === "text" || hit?.type === "sheet") ? hit.id : (!hit ? "board" : null);
         if (click_id) {
           const now = Date.now();
@@ -1747,20 +1758,38 @@
       }
 
       if (hit && event.button === 0) {
+        const previous_id = selected_id;
         selected_id = hit.id;
         if (hit.type === "sheet") {
           const cell = event.target.closest(".whiteboard-sheet-cell");
-          selected_cell = cell
-            ? { row: Number(cell.dataset.row), col: Number(cell.dataset.col) }
-            : selected_cell;
+          if (cell) {
+            const next = { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
+            const multi = (event.ctrlKey || event.metaKey) && previous_id === hit.id;
+            if (multi) {
+              const index = selected_cells.findIndex(entry => entry.row === next.row && entry.col === next.col);
+              if (index >= 0) { selected_cells.splice(index, 1); }
+              else { selected_cells.push(next); }
+            } else {
+              selected_cells = [next];
+            }
+          }
         } else {
-          selected_cell = null;
+          selected_cells = [];
         }
+
+        if ((event.ctrlKey || event.metaKey) && hit.type === "sheet") {
+          renderItems();
+          event.preventDefault();
+          return;
+        }
+
         const selected_node = world.querySelector(`.whiteboard-text-box[data-id="${hit.id}"] .whiteboard-text`)
           || world.querySelector(`.whiteboard-sheet[data-id="${hit.id}"]`);
         if (selected_node) { selected_node.classList.add("is-selected"); }
-        const active_cell = world.querySelector(`.whiteboard-sheet-cell[data-id="${hit.id}"][data-row="${selected_cell?.row}"][data-col="${selected_cell?.col}"]`);
-        if (active_cell) { active_cell.classList.add("is-active"); }
+        selected_cells.forEach(entry => {
+          const active_cell = world.querySelector(`.whiteboard-sheet-cell[data-id="${hit.id}"][data-row="${entry.row}"][data-col="${entry.col}"]`);
+          if (active_cell) { active_cell.classList.add("is-active"); }
+        });
         interaction = {
           type: "move-item",
           id: hit.id,
@@ -1773,7 +1802,7 @@
         };
       } else {
         selected_id = null;
-        selected_cell = null;
+        selected_cells = [];
         renderItems();
         interaction = {
           type: "pan",
