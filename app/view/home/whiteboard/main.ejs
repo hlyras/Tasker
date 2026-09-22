@@ -3,6 +3,14 @@
   const WHITEBOARD_LIST_KEY = "tasker-whiteboards";
   const WHITEBOARD_MIN_ZOOM = 0.08;
   const WHITEBOARD_MAX_ZOOM = 3;
+  const WHITEBOARD_TEXT_DEFAULT_FONT = 36;
+  const WHITEBOARD_TEXT_DEFAULT_WIDTH = 280;
+  const WHITEBOARD_TEXT_DEFAULT_HEIGHT = 110;
+  const WHITEBOARD_SHEET_CELL_WIDTH = 220;
+  const WHITEBOARD_SHEET_CELL_HEIGHT = 72;
+  const WHITEBOARD_SHEET_CELL_MIN_W = 100;
+  const WHITEBOARD_SHEET_CELL_MIN_H = 48;
+  const WHITEBOARD_SHEET_FONT = 22;
 
   function whiteboardCreateId() {
     return `wb-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -126,8 +134,8 @@
   }
 
   function whiteboardResizeTextRect(start, handle, point) {
-    const min_w = 64;
-    const min_h = 32;
+    const min_w = 160;
+    const min_h = 72;
     let { x, y, width, height } = start;
     const right = x + width;
     const bottom = y + height;
@@ -148,6 +156,53 @@
     }
 
     return { x, y, width, height };
+  }
+
+  function whiteboardCellData(value) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const fontSize = Number(value.fontSize);
+      return {
+        text: String(value.text ?? ""),
+        fontSize: Number.isFinite(fontSize) ? Math.max(12, Math.min(72, fontSize)) : WHITEBOARD_SHEET_FONT,
+        bold: !!value.bold
+      };
+    }
+    return {
+      text: String(value ?? ""),
+      fontSize: WHITEBOARD_SHEET_FONT,
+      bold: false
+    };
+  }
+
+  function whiteboardEnsureSheet(item) {
+    const rows = Math.max(1, Number(item.rows) || 1);
+    const cols = Math.max(1, Number(item.cols) || 1);
+    const source = Array.isArray(item.cells) ? item.cells : [];
+    const widths = Array.isArray(item.colWidths) ? item.colWidths : [];
+    const heights = Array.isArray(item.rowHeights) ? item.rowHeights : [];
+    item.rows = rows;
+    item.cols = cols;
+    item.cells = Array.from({ length: rows }, (_, row) => {
+      const current = Array.isArray(source[row]) ? source[row] : [];
+      return Array.from({ length: cols }, (_, col) => whiteboardCellData(current[col]));
+    });
+    item.colWidths = Array.from({ length: cols }, (_, col) => {
+      const width = Number(widths[col]);
+      return Number.isFinite(width) ? Math.max(WHITEBOARD_SHEET_CELL_MIN_W, width) : WHITEBOARD_SHEET_CELL_WIDTH;
+    });
+    item.rowHeights = Array.from({ length: rows }, (_, row) => {
+      const height = Number(heights[row]);
+      return Number.isFinite(height) ? Math.max(WHITEBOARD_SHEET_CELL_MIN_H, height) : WHITEBOARD_SHEET_CELL_HEIGHT;
+    });
+    return item;
+  }
+
+  function whiteboardSheetSize(item) {
+    whiteboardEnsureSheet(item);
+    return {
+      width: item.colWidths.reduce((sum, width) => sum + width, 0),
+      height: item.rowHeights.reduce((sum, height) => sum + height, 0)
+    };
   }
 
   function whiteboardDistanceToSegment(px, py, x1, y1, x2, y2) {
@@ -359,7 +414,9 @@
     };
     let tool = "pan";
     let selected_id = null;
+    let selected_cell = null;
     let editing_id = null;
+    let editing_cell = null;
     let interaction = null;
     let persist_timer = null;
 
@@ -398,6 +455,13 @@
     }, "Seta");
     tools_box.append(arrow_btn);
 
+    const sheet_btn = lib.element.create("button", {
+      type: "button",
+      class: "whiteboard-tool lucida-grande rem08",
+      title: "Criar planilha"
+    }, "Planilha");
+    tools_box.append(sheet_btn);
+
     const zoom_box = lib.element.create("div", {
       class: "mobile-box container"
     });
@@ -434,7 +498,7 @@
 
     popup.append(lib.element.create("div", {
       class: "box b1 lucida-grande rem07 padding-5 whiteboard-hint"
-    }, "Dois cliques no quadro criam um texto. Dois cliques no texto para escrever. Arraste para mover."));
+    }, "Dois cliques no quadro criam um texto. Planilha na barra cria uma tabela. Os + adicionam linha ou coluna."));
 
     const persist = () => {
       clearTimeout(persist_timer);
@@ -453,7 +517,9 @@
     const setTool = (next_tool) => {
       tool = next_tool;
       arrow_btn.classList.toggle("is-active", tool === "arrow");
+      sheet_btn.classList.toggle("is-active", tool === "sheet");
       viewport.classList.toggle("is-arrow", tool === "arrow");
+      viewport.classList.toggle("is-sheet", tool === "sheet");
     };
 
     const screenToWorld = (clientX, clientY) => {
@@ -479,6 +545,13 @@
           }
         }
 
+        if (item.type === "sheet") {
+          const size = whiteboardSheetSize(item);
+          if (x >= item.x && x <= item.x + size.width && y >= item.y && y <= item.y + size.height) {
+            return item;
+          }
+        }
+
         if (item.type === "arrow") {
           if (whiteboardDistanceToSegment(x, y, item.x1, item.y1, item.x2, item.y2) <= 10 / state.zoom) {
             return item;
@@ -492,22 +565,30 @@
     const stopEditing = () => {
       if (!editing_id) { return; }
       const item = findItem(editing_id);
-      const node = world.querySelector(`.whiteboard-text-box[data-id="${editing_id}"] .whiteboard-text`);
-      if (item && node) {
-        item.text = whiteboardReadText(node).trim();
-        node.contentEditable = "false";
-        node.classList.remove("is-editing");
+      if (item?.type === "sheet" && editing_cell) {
+        const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${editing_id}"][data-row="${editing_cell.row}"][data-col="${editing_cell.col}"] .whiteboard-sheet-cell-text`);
+        if (node) {
+          whiteboardEnsureSheet(item);
+          const style = whiteboardCellData(item.cells[editing_cell.row][editing_cell.col]);
+          style.text = whiteboardReadText(node).trim();
+          item.cells[editing_cell.row][editing_cell.col] = style;
+          node.contentEditable = "false";
+          node.classList.remove("is-editing");
+        }
+      } else {
+        const node = world.querySelector(`.whiteboard-text-box[data-id="${editing_id}"] .whiteboard-text`);
+        if (item && node) {
+          item.text = whiteboardReadText(node).trim();
+          node.contentEditable = "false";
+          node.classList.remove("is-editing");
+        }
       }
       editing_id = null;
+      editing_cell = null;
       persist();
     };
 
-    const startEditing = (item) => {
-      stopEditing();
-      selected_id = item.id;
-      editing_id = item.id;
-      renderItems();
-      const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`);
+    const focusEditable = (node) => {
       if (!node) { return; }
       node.contentEditable = "true";
       node.classList.add("is-editing");
@@ -517,6 +598,25 @@
       range.selectNodeContents(node);
       selection.removeAllRanges();
       selection.addRange(range);
+    };
+
+    const startEditing = (item, cell) => {
+      stopEditing();
+      selected_id = item.id;
+      editing_id = item.id;
+      if (item.type === "sheet") {
+        whiteboardEnsureSheet(item);
+        editing_cell = {
+          row: Math.max(0, Math.min(item.rows - 1, cell?.row || 0)),
+          col: Math.max(0, Math.min(item.cols - 1, cell?.col || 0))
+        };
+        selected_cell = { ...editing_cell };
+        renderItems();
+        focusEditable(world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${editing_cell.row}"][data-col="${editing_cell.col}"] .whiteboard-sheet-cell-text`));
+        return;
+      }
+      renderItems();
+      focusEditable(world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`));
     };
 
     const arrowBox = (item) => {
@@ -529,6 +629,346 @@
         width: Math.abs(item.x2 - item.x1) + (pad * 2),
         height: Math.abs(item.y2 - item.y1) + (pad * 2)
       };
+    };
+
+    const addSheetRow = (item) => {
+      stopEditing();
+      whiteboardEnsureSheet(item);
+      item.rows += 1;
+      item.cells.push(Array.from({ length: item.cols }, () => ""));
+      item.rowHeights.push(WHITEBOARD_SHEET_CELL_HEIGHT);
+      selected_id = item.id;
+      renderItems();
+      persist();
+    };
+
+    const addSheetCol = (item) => {
+      stopEditing();
+      whiteboardEnsureSheet(item);
+      item.cols += 1;
+      item.cells.forEach(row => row.push(""));
+      item.colWidths.push(WHITEBOARD_SHEET_CELL_WIDTH);
+      selected_id = item.id;
+      renderItems();
+      persist();
+    };
+
+    const removeSheetRow = (item) => {
+      stopEditing();
+      whiteboardEnsureSheet(item);
+      if (item.rows <= 1) { return; }
+      item.rows -= 1;
+      item.cells.pop();
+      item.rowHeights.pop();
+      selected_id = item.id;
+      renderItems();
+      persist();
+    };
+
+    const removeSheetCol = (item) => {
+      stopEditing();
+      whiteboardEnsureSheet(item);
+      if (item.cols <= 1) { return; }
+      item.cols -= 1;
+      item.cells.forEach(row => row.pop());
+      item.colWidths.pop();
+      selected_id = item.id;
+      renderItems();
+      persist();
+    };
+
+    const bindEditableNode = (item, node, on_change) => {
+      node.addEventListener("keydown", event => {
+        if (event.key !== "Enter") { return; }
+        event.preventDefault();
+        event.stopPropagation();
+        whiteboardInsertLineBreak();
+        on_change();
+      });
+      node.addEventListener("input", on_change);
+    };
+
+    const cellStyleAt = (item, row, col) => {
+      whiteboardEnsureSheet(item);
+      item.cells[row][col] = whiteboardCellData(item.cells[row][col]);
+      return item.cells[row][col];
+    };
+
+    const applyCellStyle = (style, node) => {
+      node.style.fontSize = `${style.fontSize || WHITEBOARD_SHEET_FONT}px`;
+      node.style.fontWeight = style.bold ? "700" : "400";
+    };
+
+    const changeCellFontSize = (item, row, col, delta) => {
+      const style = cellStyleAt(item, row, col);
+      style.fontSize = Math.min(72, Math.max(12, style.fontSize + delta));
+      const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${row}"][data-col="${col}"]`);
+      const toolbar = world.querySelector(`.whiteboard-sheet-cell-toolbar[data-id="${item.id}"]`);
+      const label = toolbar?.querySelector(".whiteboard-font-size-label");
+      if (node) { applyCellStyle(style, node); }
+      if (label) { label.textContent = String(style.fontSize); }
+      persist();
+    };
+
+    const toggleCellBold = (item, row, col) => {
+      const style = cellStyleAt(item, row, col);
+      style.bold = !style.bold;
+      const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${row}"][data-col="${col}"]`);
+      const toolbar = world.querySelector(`.whiteboard-sheet-cell-toolbar[data-id="${item.id}"]`);
+      const button = toolbar?.querySelector(".whiteboard-bold-btn");
+      if (node) { applyCellStyle(style, node); }
+      if (button) { button.classList.toggle("is-active", style.bold); }
+      persist();
+    };
+
+    const renderCellToolbar = (host, item, row, col, x, y) => {
+      const style = cellStyleAt(item, row, col);
+      const toolbar = lib.element.create("div", {
+        class: "whiteboard-text-toolbar whiteboard-sheet-cell-toolbar",
+        "data-id": item.id
+      });
+      toolbar.style.left = `${x}px`;
+      toolbar.style.top = `${y}px`;
+
+      const smaller = lib.element.create("button", {
+        type: "button",
+        class: "whiteboard-toolbar-btn lucida-grande bold",
+        title: "Diminuir fonte"
+      }, "A−");
+      toolbar.append(smaller);
+
+      toolbar.append(lib.element.create("div", {
+        class: "whiteboard-font-size-label lucida-grande"
+      }, String(style.fontSize)));
+
+      const larger = lib.element.create("button", {
+        type: "button",
+        class: "whiteboard-toolbar-btn lucida-grande bold",
+        title: "Aumentar fonte"
+      }, "A+");
+      toolbar.append(larger);
+
+      const bold_btn = lib.element.create("button", {
+        type: "button",
+        class: `whiteboard-toolbar-btn whiteboard-bold-btn lucida-grande bold${style.bold ? " is-active" : ""}`,
+        title: "Negrito"
+      }, "B");
+      toolbar.append(bold_btn);
+
+      const stop = event => {
+        event.stopPropagation();
+        event.preventDefault();
+      };
+
+      smaller.addEventListener("pointerdown", event => {
+        stop(event);
+        changeCellFontSize(item, row, col, -2);
+      });
+      larger.addEventListener("pointerdown", event => {
+        stop(event);
+        changeCellFontSize(item, row, col, 2);
+      });
+      bold_btn.addEventListener("pointerdown", event => {
+        stop(event);
+        toggleCellBold(item, row, col);
+      });
+
+      host.append(toolbar);
+    };
+
+    const renderSheetCtrlButton = (kind, title, label) => {
+      const button = lib.element.create("button", {
+        type: "button",
+        class: `whiteboard-sheet-ctrl whiteboard-sheet-${kind}`,
+        title
+      }, label);
+      button.dataset.kind = `sheet-${kind}`;
+      return button;
+    };
+
+    const applySheetLayout = (item, box) => {
+      if (!box) {
+        box = world.querySelector(`.whiteboard-sheet-box[data-id="${item.id}"]`);
+      }
+      if (!box) { return; }
+
+      const size = whiteboardSheetSize(item);
+      const table = box.querySelector(".whiteboard-sheet");
+      if (table) {
+        table.style.gridTemplateColumns = item.colWidths.map(width => `${width}px`).join(" ");
+        table.style.gridTemplateRows = item.rowHeights.map(height => `${height}px`).join(" ");
+        table.style.width = `${size.width}px`;
+        table.style.height = `${size.height}px`;
+      }
+
+      const resizers = box.querySelector(".whiteboard-sheet-resizers");
+      if (resizers) {
+        resizers.style.width = `${size.width}px`;
+        resizers.style.height = `${size.height}px`;
+      }
+
+      const add_col = box.querySelector(".whiteboard-sheet-add-col");
+      const add_row = box.querySelector(".whiteboard-sheet-add-row");
+      const remove_col = box.querySelector(".whiteboard-sheet-remove-col");
+      const remove_row = box.querySelector(".whiteboard-sheet-remove-row");
+      const last_col_width = item.colWidths[item.colWidths.length - 1] || WHITEBOARD_SHEET_CELL_WIDTH;
+      const last_row_height = item.rowHeights[item.rowHeights.length - 1] || WHITEBOARD_SHEET_CELL_HEIGHT;
+      if (add_col) {
+        add_col.style.left = `${size.width + 22}px`;
+        add_col.style.top = `${size.height / 2}px`;
+      }
+      if (add_row) {
+        add_row.style.left = `${size.width / 2}px`;
+        add_row.style.top = `${size.height + 22}px`;
+      }
+      if (remove_col) {
+        remove_col.style.left = `${size.width - (last_col_width / 2)}px`;
+        remove_col.style.top = `-22px`;
+        remove_col.style.display = item.cols <= 1 ? "none" : "";
+      }
+      if (remove_row) {
+        remove_row.style.left = `-22px`;
+        remove_row.style.top = `${size.height - (last_row_height / 2)}px`;
+        remove_row.style.display = item.rows <= 1 ? "none" : "";
+      }
+
+      box.querySelectorAll(".whiteboard-sheet-col-handle").forEach(handle => {
+        const index = Number(handle.dataset.index);
+        handle.style.left = `${item.colWidths.slice(0, index + 1).reduce((sum, width) => sum + width, 0)}px`;
+        handle.style.height = `${size.height}px`;
+      });
+      box.querySelectorAll(".whiteboard-sheet-row-handle").forEach(handle => {
+        const index = Number(handle.dataset.index);
+        handle.style.top = `${item.rowHeights.slice(0, index + 1).reduce((sum, height) => sum + height, 0)}px`;
+        handle.style.width = `${size.width}px`;
+      });
+    };
+
+    const renderSheet = (item) => {
+      whiteboardEnsureSheet(item);
+      const box = lib.element.create("div", {
+        class: `whiteboard-sheet-box${selected_id === item.id ? " is-selected" : ""}`,
+        "data-id": item.id
+      });
+      box.style.left = `${item.x}px`;
+      box.style.top = `${item.y}px`;
+
+      const frame = lib.element.create("div", {
+        class: "whiteboard-sheet-frame"
+      });
+      box.append(frame);
+
+      const table = lib.element.create("div", {
+        class: `whiteboard-sheet${selected_id === item.id ? " is-selected" : ""}`,
+        "data-id": item.id
+      });
+      frame.append(table);
+
+      item.cells.forEach((row, row_index) => {
+        row.forEach((value, col_index) => {
+          const style = whiteboardCellData(value);
+          const active = selected_id === item.id
+            && selected_cell
+            && selected_cell.row === row_index
+            && selected_cell.col === col_index;
+          const cell = lib.element.create("div", {
+            class: `whiteboard-sheet-cell lucida-grande${active ? " is-active" : ""}`,
+            "data-id": item.id,
+            "data-row": String(row_index),
+            "data-col": String(col_index)
+          });
+          const text_node = lib.element.create("div", {
+            class: "whiteboard-sheet-cell-text"
+          });
+          text_node.textContent = style.text || "";
+          applyCellStyle(style, cell);
+          bindEditableNode(item, text_node, () => {
+            const next = cellStyleAt(item, row_index, col_index);
+            next.text = whiteboardReadText(text_node);
+            persist();
+          });
+          cell.append(text_node);
+          table.append(cell);
+        });
+      });
+
+      const resizers = lib.element.create("div", {
+        class: "whiteboard-sheet-resizers"
+      });
+      frame.append(resizers);
+
+      item.colWidths.forEach((_, index) => {
+        const handle = lib.element.create("div", {
+          class: "whiteboard-sheet-resize whiteboard-sheet-col-handle"
+        });
+        handle.dataset.id = item.id;
+        handle.dataset.kind = "sheet-col";
+        handle.dataset.index = String(index);
+        resizers.append(handle);
+      });
+      item.rowHeights.forEach((_, index) => {
+        const handle = lib.element.create("div", {
+          class: "whiteboard-sheet-resize whiteboard-sheet-row-handle"
+        });
+        handle.dataset.id = item.id;
+        handle.dataset.kind = "sheet-row";
+        handle.dataset.index = String(index);
+        resizers.append(handle);
+      });
+
+      const add_col = renderSheetCtrlButton("add-col", "Adicionar coluna", "+");
+      add_col.dataset.id = item.id;
+      add_col.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        addSheetCol(item);
+      });
+      frame.append(add_col);
+
+      const add_row = renderSheetCtrlButton("add-row", "Adicionar linha", "+");
+      add_row.dataset.id = item.id;
+      add_row.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        addSheetRow(item);
+      });
+      frame.append(add_row);
+
+      const remove_col = renderSheetCtrlButton("remove-col", "Remover coluna", "−");
+      remove_col.dataset.id = item.id;
+      remove_col.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        removeSheetCol(item);
+      });
+      frame.append(remove_col);
+
+      const remove_row = renderSheetCtrlButton("remove-row", "Remover linha", "−");
+      remove_row.dataset.id = item.id;
+      remove_row.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        removeSheetRow(item);
+      });
+      frame.append(remove_row);
+
+      if (selected_id === item.id && selected_cell) {
+        const col = Math.min(selected_cell.col, item.cols - 1);
+        const row = Math.min(selected_cell.row, item.rows - 1);
+        selected_cell = { row, col };
+        const x = item.colWidths.slice(0, col).reduce((sum, width) => sum + width, 0) + (item.colWidths[col] / 2);
+        const y = item.rowHeights.slice(0, row).reduce((sum, height) => sum + height, 0);
+        renderCellToolbar(frame, item, row, col, x, y);
+      }
+
+      if (selected_id === item.id) {
+        renderDeleteButton(item, box, null);
+        const trash = box.querySelector(".whiteboard-delete");
+        if (trash) { trash.classList.add("whiteboard-delete-sheet"); }
+      }
+
+      applySheetLayout(item, box);
+      return box;
     };
 
     const renderArrow = (item) => {
@@ -601,12 +1041,12 @@
     };
 
     const applyTextStyle = (item, node) => {
-      node.style.fontSize = `${item.fontSize || 30}px`;
+      node.style.fontSize = `${item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT}px`;
       node.style.fontWeight = item.bold ? "700" : "400";
     };
 
     const changeFontSize = (item, delta) => {
-      item.fontSize = Math.min(72, Math.max(10, (item.fontSize || 30) + delta));
+      item.fontSize = Math.min(96, Math.max(14, (item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT) + delta));
       const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`);
       const label = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-font-size-label`);
       if (node) { applyTextStyle(item, node); }
@@ -638,7 +1078,7 @@
 
       toolbar.append(lib.element.create("div", {
         class: "whiteboard-font-size-label lucida-grande"
-      }, String(item.fontSize || 30)));
+      }, String(item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT)));
 
       const larger = lib.element.create("button", {
         type: "button",
@@ -692,6 +1132,13 @@
           return;
         }
 
+        if (item.type === "sheet") {
+          world.append(renderSheet(item));
+          return;
+        }
+
+        if (item.type !== "text") { return; }
+
         const box = lib.element.create("div", {
           class: `whiteboard-text-box${item.width || item.height ? " has-size" : ""}`,
           "data-id": item.id
@@ -727,6 +1174,13 @@
 
         world.append(box);
       });
+    };
+
+    const syncSheetBox = (item) => {
+      const box = world.querySelector(`.whiteboard-sheet-box[data-id="${item.id}"]`);
+      if (!box) { return; }
+      box.style.left = `${item.x}px`;
+      box.style.top = `${item.y}px`;
     };
 
     const syncTextBox = (item) => {
@@ -792,6 +1246,7 @@
       stopEditing();
       state.items = state.items.filter(item => item.id !== selected_id);
       selected_id = null;
+      selected_cell = null;
       renderItems();
       persist();
     };
@@ -799,6 +1254,11 @@
     arrow_btn.addEventListener("click", () => {
       stopEditing();
       setTool(tool === "arrow" ? "pan" : "arrow");
+    });
+
+    sheet_btn.addEventListener("click", () => {
+      stopEditing();
+      setTool(tool === "sheet" ? "pan" : "sheet");
     });
 
     zoom_in_btn.addEventListener("click", () => {
@@ -944,6 +1404,10 @@
           item.x += dx;
           item.y += dy;
           syncTextBox(item);
+        } else if (item.type === "sheet") {
+          item.x += dx;
+          item.y += dy;
+          syncSheetBox(item);
         } else {
           item.x1 += dx;
           item.y1 += dy;
@@ -965,6 +1429,25 @@
         item.width = next.width;
         item.height = next.height;
         syncTextBox(item);
+        return;
+      }
+
+      if (interaction.type === "resize-sheet-col" || interaction.type === "resize-sheet-row") {
+        const item = findItem(interaction.id);
+        if (!item) { return; }
+        whiteboardEnsureSheet(item);
+        if (interaction.type === "resize-sheet-col") {
+          item.colWidths[interaction.index] = Math.max(
+            WHITEBOARD_SHEET_CELL_MIN_W,
+            Math.round(interaction.startSize + (world_point.x - interaction.originWorldX))
+          );
+        } else {
+          item.rowHeights[interaction.index] = Math.max(
+            WHITEBOARD_SHEET_CELL_MIN_H,
+            Math.round(interaction.startSize + (world_point.y - interaction.originWorldY))
+          );
+        }
+        applySheetLayout(item);
         return;
       }
 
@@ -1000,7 +1483,7 @@
 
       if (!ended) { return; }
 
-      if (ended.type === "move-item" || ended.type === "resize-text" || ended.type === "pan" || ended.type === "draw-arrow" || ended.type === "resize-arrow") {
+      if (ended.type === "move-item" || ended.type === "resize-text" || ended.type === "resize-sheet-col" || ended.type === "resize-sheet-row" || ended.type === "pan" || ended.type === "draw-arrow" || ended.type === "resize-arrow") {
         if (ended.type !== "pan") { renderItems(); }
         persist();
       }
@@ -1068,13 +1551,35 @@
       try { viewport.setPointerCapture(event.pointerId); } catch (error) { }
     };
 
+    const createSheetAt = (world_point) => {
+      const item = whiteboardEnsureSheet({
+        id: whiteboardCreateId(),
+        type: "sheet",
+        x: world_point.x,
+        y: world_point.y,
+        rows: 1,
+        cols: 1,
+        cells: [[""]]
+      });
+      state.items.push(item);
+      selected_id = item.id;
+      setTool("pan");
+      renderItems();
+      persist();
+      startEditing(item, { row: 0, col: 0 });
+      return item;
+    };
+
     const createTextAt = (world_point) => {
       const item = {
         id: whiteboardCreateId(),
         type: "text",
         x: world_point.x,
         y: world_point.y,
-        text: ""
+        text: "",
+        fontSize: WHITEBOARD_TEXT_DEFAULT_FONT,
+        width: WHITEBOARD_TEXT_DEFAULT_WIDTH,
+        height: WHITEBOARD_TEXT_DEFAULT_HEIGHT
       };
       state.items.push(item);
       selected_id = item.id;
@@ -1103,9 +1608,10 @@
       if (event.button !== 0 && event.button !== 1) { return; }
 
       const delete_btn = event.target.closest(".whiteboard-delete");
-      const handle = event.target.closest(".whiteboard-handle");
+      const sheet_btn = event.target.closest(".whiteboard-sheet-ctrl");
+      const handle = event.target.closest(".whiteboard-handle, .whiteboard-sheet-resize");
       const world_point = screenToWorld(event.clientX, event.clientY);
-      const hit = handle || delete_btn ? findItem(selected_id) : hitTest(world_point.x, world_point.y);
+      const hit = handle || delete_btn || sheet_btn ? findItem((handle || delete_btn || sheet_btn).dataset.id) : hitTest(world_point.x, world_point.y);
 
       if (delete_btn) {
         selected_id = delete_btn.dataset.id;
@@ -1116,12 +1622,26 @@
         return;
       }
 
+      if (sheet_btn) {
+        last_click = { time: 0, id: null, x: 0, y: 0 };
+        if (hit) {
+          selected_id = hit.id;
+          if (sheet_btn.dataset.kind === "sheet-add-row") { addSheetRow(hit); }
+          else if (sheet_btn.dataset.kind === "sheet-add-col") { addSheetCol(hit); }
+          else if (sheet_btn.dataset.kind === "sheet-remove-row") { removeSheetRow(hit); }
+          else if (sheet_btn.dataset.kind === "sheet-remove-col") { removeSheetCol(hit); }
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (event.target.closest(".whiteboard-text-toolbar")) {
         event.stopPropagation();
         return;
       }
 
-      if (event.target.closest(".whiteboard-text.is-editing")) {
+      if (event.target.closest(".whiteboard-text.is-editing") || event.target.closest(".whiteboard-sheet-cell-text.is-editing")) {
         return;
       }
 
@@ -1146,6 +1666,19 @@
             width: item.width || box.offsetWidth,
             height: item.height || box.offsetHeight
           };
+        } else if (handle.dataset.kind === "sheet-col" || handle.dataset.kind === "sheet-row") {
+          const item = findItem(selected_id);
+          whiteboardEnsureSheet(item);
+          const index = Number(handle.dataset.index);
+          interaction = {
+            type: handle.dataset.kind === "sheet-col" ? "resize-sheet-col" : "resize-sheet-row",
+            id: selected_id,
+            pointer_id: event.pointerId,
+            index,
+            startSize: handle.dataset.kind === "sheet-col" ? item.colWidths[index] : item.rowHeights[index],
+            originWorldX: world_point.x,
+            originWorldY: world_point.y
+          };
         } else {
           interaction = {
             type: "resize-arrow",
@@ -1158,8 +1691,8 @@
         return;
       }
 
-      if (event.button === 0 && tool !== "arrow") {
-        const click_id = hit?.type === "text" ? hit.id : (!hit ? "board" : null);
+      if (event.button === 0 && tool !== "arrow" && tool !== "sheet") {
+        const click_id = (hit?.type === "text" || hit?.type === "sheet") ? hit.id : (!hit ? "board" : null);
         if (click_id) {
           const now = Date.now();
           const is_double = last_click.id === click_id
@@ -1170,6 +1703,12 @@
           if (is_double) {
             if (click_id === "board") {
               createTextAt(world_point);
+            } else if (hit.type === "sheet") {
+              const cell = event.target.closest(".whiteboard-sheet-cell");
+              startEditing(hit, {
+                row: Number(cell?.dataset.row || 0),
+                col: Number(cell?.dataset.col || 0)
+              });
             } else {
               startEditing(hit);
             }
@@ -1177,6 +1716,12 @@
             return;
           }
         }
+      }
+
+      if (tool === "sheet" && event.button === 0 && !hit) {
+        createSheetAt(world_point);
+        event.preventDefault();
+        return;
       }
 
       if (tool === "arrow" && event.button === 0) {
@@ -1203,8 +1748,19 @@
 
       if (hit && event.button === 0) {
         selected_id = hit.id;
-        const selected_node = world.querySelector(`.whiteboard-text-box[data-id="${hit.id}"] .whiteboard-text`);
+        if (hit.type === "sheet") {
+          const cell = event.target.closest(".whiteboard-sheet-cell");
+          selected_cell = cell
+            ? { row: Number(cell.dataset.row), col: Number(cell.dataset.col) }
+            : selected_cell;
+        } else {
+          selected_cell = null;
+        }
+        const selected_node = world.querySelector(`.whiteboard-text-box[data-id="${hit.id}"] .whiteboard-text`)
+          || world.querySelector(`.whiteboard-sheet[data-id="${hit.id}"]`);
         if (selected_node) { selected_node.classList.add("is-selected"); }
+        const active_cell = world.querySelector(`.whiteboard-sheet-cell[data-id="${hit.id}"][data-row="${selected_cell?.row}"][data-col="${selected_cell?.col}"]`);
+        if (active_cell) { active_cell.classList.add("is-active"); }
         interaction = {
           type: "move-item",
           id: hit.id,
@@ -1217,6 +1773,7 @@
         };
       } else {
         selected_id = null;
+        selected_cell = null;
         renderItems();
         interaction = {
           type: "pan",
