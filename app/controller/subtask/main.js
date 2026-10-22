@@ -35,10 +35,34 @@ subtaskController.update = async (req, res) => {
   subtask.status = req.body.status;
   subtask.sort_order = req.body.sort_order;
 
+  const has_due_date = Object.prototype.hasOwnProperty.call(req.body, "due_date");
+  const clear_due_date = has_due_date && (req.body.due_date === null || req.body.due_date === "");
+
+  if (has_due_date && !clear_due_date) {
+    const due_date = Number(req.body.due_date);
+    if (!due_date) {
+      return res.send({ msg: "O prazo de finalização é inválido." });
+    }
+    subtask.due_date = due_date;
+  }
+
   try {
-    let subtask_response = await subtask.update();
-    if (subtask_response.err) {
-      return res.send({ msg: subtask_response.err });
+    const fields = lib.convertTo.object(subtask);
+    const has_changes = Object.keys(fields).some(key => key !== "id");
+
+    if (has_changes) {
+      let subtask_response = await subtask.update();
+      if (subtask_response.err) {
+        return res.send({ msg: subtask_response.err });
+      }
+    }
+
+    if (clear_due_date) {
+      await Subtask.clearDueDate(subtask.id);
+    }
+
+    if (!has_changes && !clear_due_date) {
+      return res.send({ msg: "Nenhuma alteração informada." });
     }
 
     return res.send({ done: "Subtarefa atualizada." });

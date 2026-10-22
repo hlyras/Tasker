@@ -51,8 +51,8 @@
   <section class="container margin-top-20 margin-bottom-20 h-center">
     <div class="box b2-3 container ground padding-15 border margin-bottom-200 ">
       <div class="box b1 container">
-        <%- include('./calendar/home.ejs') %>
         <%- include('./calendar/main.ejs') %>
+        <%- include('./kanban/main.ejs') %>
         <%- include('./note/main.ejs') %>
         <%- include('./whiteboard/main.ejs') %>
         <%- include('./workout/main.ejs') %>
@@ -109,7 +109,9 @@
       });
 
       calendar_icon.addEventListener("click", async () => {
-        lib.popup(await calendarPopup(), false, true);
+        lib.popup(await calendarPopup(), () => {
+          calendarPopupRerender = null;
+        }, true);
       });
 
       diary_icon.addEventListener("click", async () => {

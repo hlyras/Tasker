@@ -50,7 +50,8 @@ function calendarPayload(row) {
     schedule: parseJsonField(row && row.schedule, {}),
     repeats: parseJsonField(row && row.repeats, {}),
     seeded_weeks: parseJsonField(row && row.seeded_weeks, []),
-    xp_events: parseJsonField(row && row.xp_events, {})
+    xp_events: parseJsonField(row && row.xp_events, {}),
+    version: Number(row && row.version) || 0
   };
 }
 
@@ -95,19 +96,60 @@ calendarController.save = async (req, res) => {
       strict_params: { keys: ["user_id"], values: [user_id] }
     });
 
-    let response;
     if (existing) {
-      calendar.id = existing.id;
-      response = await calendar.update();
-    } else {
-      response = await calendar.create();
+      const current = Number(existing.version) || 0;
+      const base = Number(req.body.version);
+      const incoming_schedule = parseJsonField(calendar.schedule, {});
+      const stored_schedule = parseJsonField(existing.schedule, {});
+
+      if (!Object.keys(incoming_schedule).length && Object.keys(stored_schedule).length) {
+        return res.send({
+          conflict: true,
+          found: true,
+          ...calendarPayload(existing)
+        });
+      }
+
+      if (Number.isFinite(base) && base !== current) {
+        return res.send({
+          conflict: true,
+          found: true,
+          ...calendarPayload(existing)
+        });
+      }
+
+      const result = await Calendar.updateIfVersion({
+        id: existing.id,
+        version: current,
+        schedule: calendar.schedule,
+        repeats: calendar.repeats,
+        seeded_weeks: calendar.seeded_weeks,
+        xp_events: calendar.xp_events
+      });
+
+      if (!result || !result.affectedRows) {
+        const [fresh] = await Calendar.filter({
+          strict_params: { keys: ["user_id"], values: [user_id] }
+        });
+
+        return res.send({
+          conflict: true,
+          found: Boolean(fresh),
+          ...calendarPayload(fresh)
+        });
+      }
+
+      return res.send({ done: true, version: current + 1 });
     }
+
+    calendar.version = 1;
+    const response = await calendar.create();
 
     if (response && response.err) {
       return res.send({ msg: response.err });
     }
 
-    return res.send({ done: true });
+    return res.send({ done: true, version: 1 });
   } catch (error) {
     console.log(error);
     res.send({

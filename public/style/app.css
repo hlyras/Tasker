@@ -78,6 +78,10 @@ tr:hover {
   overflow-x: scroll;
 }
 
+#home-kanban.scroll-x::-webkit-scrollbar {
+  height: 2px;
+}
+
 .scroll-hide {
   overflow-y: hidden;
   overflow-x: hidden;
@@ -6105,6 +6109,48 @@ body.drag-grabbing * {
 
 .subtask-item {
   cursor: grab;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.subtask-item > textarea.mobile-box {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  field-sizing: fixed;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.subtask-item > .mobile-box {
+  width: auto;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  margin-right: 2px;
+}
+
+.subtask-deadline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.subtask-deadline .mobile-box {
+  width: auto;
+  margin: 0;
+}
+
+.subtask-deadline-date {
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.subtask-deadline-popup input[type="date"] {
+  width: 100%;
 }
 
 textarea,
@@ -6149,6 +6195,15 @@ textarea,
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.calendar-popup .calendar-home {
+  flex: 1;
+  min-height: 0;
+}
+
+.calendar-popup .calendar-body {
+  max-height: calc(100dvh - 230px);
 }
 
 .calendar-home-toggle {
@@ -6288,6 +6343,38 @@ textarea,
   background: var(--ground);
 }
 
+.calendar-slot.is-drop-target {
+  outline: 2px solid #245ae5;
+  background: rgba(36, 90, 229, 0.08);
+}
+
+.calendar-chip-draggable.is-drop-before {
+  box-shadow: 0 -3px 0 #245ae5;
+}
+
+.calendar-chip-draggable.is-drop-after {
+  box-shadow: 0 3px 0 #245ae5;
+}
+
+.calendar-chip-draggable {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.calendar-chip-draggable.is-dragging {
+  opacity: 0.35;
+}
+
+.calendar-chip-ghost {
+  position: fixed;
+  z-index: 40;
+  margin: 0;
+  pointer-events: none;
+  opacity: 0.94;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
 .calendar-row-current .calendar-slot {
   border-color: var(--solid);
 }
@@ -6420,6 +6507,32 @@ textarea,
   line-height: 1.2;
   word-break: break-word;
   margin-top: 2px;
+}
+
+.home-kanban-time {
+  font-size: 0.55rem;
+  line-height: 1.1;
+  color: #3a3a3a;
+  padding: 1px 3px 0;
+}
+
+.home-kanban-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.home-kanban-exercises {
+  padding: 0 3px 2px;
+}
+
+.home-kanban-exercise {
+  font-size: 0.65rem;
+  line-height: 1.25;
+  color: #3a3a3a;
+  word-break: break-word;
 }
 
 .calendar-picker-tabs {
@@ -6618,11 +6731,24 @@ textarea,
     linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
   border: 1px solid var(--light);
   border-radius: 8px;
-  cursor: grab;
+  cursor: default;
 }
 
 .whiteboard-viewport.is-panning {
   cursor: grabbing;
+}
+
+.whiteboard-viewport.is-selecting {
+  cursor: crosshair;
+}
+
+.whiteboard-marquee {
+  position: absolute;
+  z-index: 8;
+  box-sizing: border-box;
+  border: 1px solid #3b6ea5;
+  background: rgba(59, 110, 165, 0.14);
+  pointer-events: none;
 }
 
 .whiteboard-viewport.is-text {
@@ -6871,6 +6997,10 @@ textarea,
   stroke: #3b6ea5;
 }
 
+.whiteboard-arrow.is-selected polygon {
+  fill: #3b6ea5;
+}
+
 .whiteboard-handle {
   position: absolute;
   width: 16px;
@@ -6961,11 +7091,30 @@ textarea,
 }
 
 .whiteboard-font-size-label {
-  min-width: 20px;
+  width: 32px;
+  min-width: 32px;
+  height: 22px;
+  margin: 0;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  box-sizing: border-box;
   text-align: center;
   font-size: 11px;
+  line-height: 20px;
   color: var(--strong);
-  user-select: none;
+  cursor: text;
+  outline: none;
+  box-shadow: none;
+  touch-action: auto;
+  user-select: text;
+}
+
+.whiteboard-font-size-label:hover,
+.whiteboard-font-size-label:focus {
+  border-color: var(--light);
+  background: #fff;
 }
 
 .whiteboard-delete {
@@ -7013,6 +7162,35 @@ textarea,
 
 .whiteboard-hint {
   color: var(--strong);
+}
+
+.home-task-view-select {
+  border: 1px solid var(--light);
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.home-task-view-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.home-task-view-center {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.home-avulsa-create {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

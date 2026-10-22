@@ -7,6 +7,7 @@ const AvulsaTask = function () {
   this.description;
   this.status;
   this.recurrence_type;
+  this.sort_order;
 
   this.create = () => {
     let obj = lib.convertTo.object(this);

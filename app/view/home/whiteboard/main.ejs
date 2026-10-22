@@ -174,6 +174,30 @@
     };
   }
 
+  function whiteboardParseNumber(text) {
+    const raw = String(text || "").trim();
+    if (!raw) { return null; }
+    const cleaned = raw.replace(/[^\d,.\-]/g, "");
+    if (!cleaned || cleaned === "-" || cleaned === "," || cleaned === ".") { return null; }
+    const comma = cleaned.lastIndexOf(",");
+    const dot = cleaned.lastIndexOf(".");
+    let normalized = cleaned;
+    if (comma !== -1 && dot !== -1) {
+      normalized = comma > dot
+        ? cleaned.replace(/\./g, "").replace(",", ".")
+        : cleaned.replace(/,/g, "");
+    } else if (comma !== -1) {
+      normalized = cleaned.replace(",", ".");
+    }
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function whiteboardFormatNumber(value) {
+    if (Number.isInteger(value)) { return String(value); }
+    return value.toLocaleString("pt-BR", { maximumFractionDigits: 4, minimumFractionDigits: 0 });
+  }
+
   function whiteboardEnsureSheet(item) {
     const rows = Math.max(1, Number(item.rows) || 1);
     const cols = Math.max(1, Number(item.cols) || 1);
@@ -414,7 +438,9 @@
     };
     let tool = "pan";
     let selected_id = null;
+    let selected_ids = [];
     let selected_cells = [];
+    let space_pan = false;
     let editing_id = null;
     let editing_cell = null;
     let interaction = null;
@@ -498,7 +524,7 @@
 
     popup.append(lib.element.create("div", {
       class: "box b1 lucida-grande rem07 padding-5 whiteboard-hint"
-    }, "Dois cliques no quadro criam um texto. Planilha na barra cria uma tabela. Os + adicionam linha ou coluna."));
+    }, "Dois cliques no quadro criam um texto. Arraste no vazio para selecionar uma área e mova o grupo junto. Botão do meio ou Espaço arrasta o quadro."));
 
     const persist = () => {
       clearTimeout(persist_timer);
@@ -562,6 +588,23 @@
       return null;
     };
 
+    const setSelection = (ids) => {
+      const next = [];
+      (ids || []).forEach(id => {
+        if (id && !next.includes(id)) { next.push(id); }
+      });
+      const same_sheet = next.length === 1
+        && next[0] === selected_id
+        && findItem(next[0])?.type === "sheet";
+      selected_ids = next;
+      selected_id = next[next.length - 1] || null;
+      if (!same_sheet) { selected_cells = []; }
+    };
+
+    const isSelected = (id) => selected_ids.includes(id);
+
+    const isSolo = (id) => selected_id === id && selected_ids.length === 1;
+
     const stopEditing = () => {
       if (!editing_id) { return; }
       const item = findItem(editing_id);
@@ -602,7 +645,7 @@
 
     const startEditing = (item, cell) => {
       stopEditing();
-      selected_id = item.id;
+      setSelection([item.id]);
       editing_id = item.id;
       if (item.type === "sheet") {
         whiteboardEnsureSheet(item);
@@ -637,7 +680,7 @@
       item.rows += 1;
       item.cells.push(Array.from({ length: item.cols }, () => ""));
       item.rowHeights.push(WHITEBOARD_SHEET_CELL_HEIGHT);
-      selected_id = item.id;
+      setSelection([item.id]);
       renderItems();
       persist();
     };
@@ -648,7 +691,7 @@
       item.cols += 1;
       item.cells.forEach(row => row.push(""));
       item.colWidths.push(WHITEBOARD_SHEET_CELL_WIDTH);
-      selected_id = item.id;
+      setSelection([item.id]);
       renderItems();
       persist();
     };
@@ -660,7 +703,7 @@
       item.rows -= 1;
       item.cells.pop();
       item.rowHeights.pop();
-      selected_id = item.id;
+      setSelection([item.id]);
       renderItems();
       persist();
     };
@@ -672,7 +715,7 @@
       item.cols -= 1;
       item.cells.forEach(row => row.pop());
       item.colWidths.pop();
-      selected_id = item.id;
+      setSelection([item.id]);
       renderItems();
       persist();
     };
@@ -699,10 +742,58 @@
       node.style.fontWeight = style.bold ? "700" : "400";
     };
 
-    const changeCellFontSize = (item, delta) => {
+    const createFontSizeInput = (readSize, writeSize) => {
+      const input = lib.element.create("input", {
+        type: "text",
+        inputmode: "numeric",
+        class: "whiteboard-font-size-label lucida-grande",
+        title: "Tamanho da fonte",
+        value: String(readSize()),
+        autocomplete: "off",
+        spellcheck: "false"
+      });
+      const show = () => {
+        input.value = String(readSize());
+      };
+
+      const commit = () => {
+        const parsed = Number.parseInt(String(input.value).trim(), 10);
+        if (Number.isFinite(parsed)) { writeSize(parsed); }
+        show();
+      };
+
+      input.commitFontSize = commit;
+
+      input.addEventListener("pointerdown", event => {
+        event.stopPropagation();
+      });
+      input.addEventListener("pointerup", event => {
+        event.stopPropagation();
+        input.select();
+      });
+      input.addEventListener("keydown", event => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+          input.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          show();
+          input.blur();
+        }
+      });
+      input.addEventListener("blur", commit);
+
+      return input;
+    };
+
+    const changeCellFontSize = (item, delta, absolute) => {
       const primary = selected_cells[selected_cells.length - 1];
       if (!primary) { return; }
-      const next_size = Math.min(72, Math.max(12, cellStyleAt(item, primary.row, primary.col).fontSize + delta));
+      const current = cellStyleAt(item, primary.row, primary.col).fontSize;
+      const raw = Number.isFinite(absolute) ? absolute : current + delta;
+      const next_size = Math.min(72, Math.max(12, Math.round(raw)));
       selected_cells.forEach(entry => {
         const style = cellStyleAt(item, entry.row, entry.col);
         style.fontSize = next_size;
@@ -711,7 +802,7 @@
       });
       const toolbar = world.querySelector(`.whiteboard-sheet-cell-toolbar[data-id="${item.id}"]`);
       const label = toolbar?.querySelector(".whiteboard-font-size-label");
-      if (label) { label.textContent = String(next_size); }
+      if (label) { label.value = String(next_size); }
       persist();
     };
 
@@ -727,6 +818,25 @@
       const toolbar = world.querySelector(`.whiteboard-sheet-cell-toolbar[data-id="${item.id}"]`);
       const button = toolbar?.querySelector(".whiteboard-bold-btn");
       if (button) { button.classList.toggle("is-active", next_bold); }
+      persist();
+    };
+
+    const sumSelectedCells = (item) => {
+      const primary = selected_cells[selected_cells.length - 1];
+      if (!primary) { return; }
+      let total = 0;
+      let found = false;
+      selected_cells.forEach(entry => {
+        const value = whiteboardParseNumber(cellStyleAt(item, entry.row, entry.col).text);
+        if (value == null) { return; }
+        found = true;
+        total += value;
+      });
+      if (!found) { return; }
+      const style = cellStyleAt(item, primary.row, primary.col);
+      style.text = whiteboardFormatNumber(total);
+      const node = world.querySelector(`.whiteboard-sheet-cell[data-id="${item.id}"][data-row="${primary.row}"][data-col="${primary.col}"] .whiteboard-sheet-cell-text`);
+      if (node) { node.textContent = style.text; }
       persist();
     };
 
@@ -746,9 +856,10 @@
       }, "A−");
       toolbar.append(smaller);
 
-      toolbar.append(lib.element.create("div", {
-        class: "whiteboard-font-size-label lucida-grande"
-      }, String(style.fontSize)));
+      toolbar.append(createFontSizeInput(
+        () => cellStyleAt(item, row, col).fontSize,
+        (size) => { changeCellFontSize(item, 0, size); }
+      ));
 
       const larger = lib.element.create("button", {
         type: "button",
@@ -764,22 +875,42 @@
       }, "B");
       toolbar.append(bold_btn);
 
+      const sum_btn = lib.element.create("button", {
+        type: "button",
+        class: "whiteboard-toolbar-btn lucida-grande bold",
+        title: "Somar células selecionadas"
+      }, "Σ");
+      toolbar.append(sum_btn);
+
       const stop = event => {
         event.stopPropagation();
         event.preventDefault();
       };
 
+      const commitOpenSize = () => {
+        const field = toolbar.querySelector(".whiteboard-font-size-label");
+        if (field && document.activeElement === field && typeof field.commitFontSize === "function") {
+          field.commitFontSize();
+        }
+      };
+
       smaller.addEventListener("pointerdown", event => {
         stop(event);
+        commitOpenSize();
         changeCellFontSize(item, -2);
       });
       larger.addEventListener("pointerdown", event => {
         stop(event);
+        commitOpenSize();
         changeCellFontSize(item, 2);
       });
       bold_btn.addEventListener("pointerdown", event => {
         stop(event);
         toggleCellBold(item);
+      });
+      sum_btn.addEventListener("pointerdown", event => {
+        stop(event);
+        sumSelectedCells(item);
       });
 
       host.append(toolbar);
@@ -822,23 +953,26 @@
       const remove_row = box.querySelector(".whiteboard-sheet-remove-row");
       const last_col_width = item.colWidths[item.colWidths.length - 1] || WHITEBOARD_SHEET_CELL_WIDTH;
       const last_row_height = item.rowHeights[item.rowHeights.length - 1] || WHITEBOARD_SHEET_CELL_HEIGHT;
+      const hide_ctrl = isSolo(item.id) && selected_cells.length > 0;
       if (add_col) {
         add_col.style.left = `${size.width + 22}px`;
         add_col.style.top = `${size.height / 2}px`;
+        add_col.style.display = hide_ctrl ? "none" : "";
       }
       if (add_row) {
         add_row.style.left = `${size.width / 2}px`;
         add_row.style.top = `${size.height + 22}px`;
+        add_row.style.display = hide_ctrl ? "none" : "";
       }
       if (remove_col) {
         remove_col.style.left = `${size.width - (last_col_width / 2)}px`;
         remove_col.style.top = `-22px`;
-        remove_col.style.display = item.cols <= 1 ? "none" : "";
+        remove_col.style.display = hide_ctrl || item.cols <= 1 ? "none" : "";
       }
       if (remove_row) {
         remove_row.style.left = `-22px`;
         remove_row.style.top = `${size.height - (last_row_height / 2)}px`;
-        remove_row.style.display = item.rows <= 1 ? "none" : "";
+        remove_row.style.display = hide_ctrl || item.rows <= 1 ? "none" : "";
       }
 
       box.querySelectorAll(".whiteboard-sheet-col-handle").forEach(handle => {
@@ -856,7 +990,7 @@
     const renderSheet = (item) => {
       whiteboardEnsureSheet(item);
       const box = lib.element.create("div", {
-        class: `whiteboard-sheet-box${selected_id === item.id ? " is-selected" : ""}`,
+        class: `whiteboard-sheet-box${isSelected(item.id) ? " is-selected" : ""}`,
         "data-id": item.id
       });
       box.style.left = `${item.x}px`;
@@ -868,7 +1002,7 @@
       box.append(frame);
 
       const table = lib.element.create("div", {
-        class: `whiteboard-sheet${selected_id === item.id ? " is-selected" : ""}`,
+        class: `whiteboard-sheet${isSelected(item.id) ? " is-selected" : ""}`,
         "data-id": item.id
       });
       frame.append(table);
@@ -876,7 +1010,7 @@
       item.cells.forEach((row, row_index) => {
         row.forEach((value, col_index) => {
           const style = whiteboardCellData(value);
-          const active = selected_id === item.id
+          const active = isSolo(item.id)
             && selected_cells.some(entry => entry.row === row_index && entry.col === col_index);
           const cell = lib.element.create("div", {
             class: `whiteboard-sheet-cell lucida-grande${active ? " is-active" : ""}`,
@@ -959,7 +1093,7 @@
       });
       frame.append(remove_row);
 
-      if (selected_id === item.id && selected_cells.length) {
+      if (isSolo(item.id) && selected_cells.length) {
         selected_cells = selected_cells
           .map(entry => ({
             row: Math.min(entry.row, item.rows - 1),
@@ -972,7 +1106,7 @@
         renderCellToolbar(frame, item, primary.row, primary.col, x, y);
       }
 
-      if (selected_id === item.id) {
+      if (isSolo(item.id)) {
         renderDeleteButton(item, box, null);
         const trash = box.querySelector(".whiteboard-delete");
         if (trash) { trash.classList.add("whiteboard-delete-sheet"); }
@@ -985,7 +1119,7 @@
     const renderArrow = (item) => {
       const box = arrowBox(item);
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("class", `whiteboard-arrow${selected_id === item.id ? " is-selected" : ""}`);
+      svg.setAttribute("class", `whiteboard-arrow${isSelected(item.id) ? " is-selected" : ""}`);
       svg.setAttribute("data-id", item.id);
       svg.style.left = `${box.left}px`;
       svg.style.top = `${box.top}px`;
@@ -997,11 +1131,11 @@
       svg.innerHTML = `
         <defs>
           <marker id="${marker_id}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="${selected_id === item.id ? "#3b6ea5" : "#222"}"></polygon>
+            <polygon points="0 0, 10 3.5, 0 7" fill="${isSelected(item.id) ? "#3b6ea5" : "#222"}"></polygon>
           </marker>
         </defs>
         <line class="whiteboard-arrow-hit" x1="${item.x1 - box.left}" y1="${item.y1 - box.top}" x2="${item.x2 - box.left}" y2="${item.y2 - box.top}" stroke="transparent" stroke-width="16"></line>
-        <line class="whiteboard-arrow-line" x1="${item.x1 - box.left}" y1="${item.y1 - box.top}" x2="${item.x2 - box.left}" y2="${item.y2 - box.top}" stroke="${selected_id === item.id ? "#3b6ea5" : "#222"}" stroke-width="2.6" stroke-linecap="round" marker-end="url(#${marker_id})"></line>
+        <line class="whiteboard-arrow-line" x1="${item.x1 - box.left}" y1="${item.y1 - box.top}" x2="${item.x2 - box.left}" y2="${item.y2 - box.top}" stroke="${isSelected(item.id) ? "#3b6ea5" : "#222"}" stroke-width="2.6" stroke-linecap="round" marker-end="url(#${marker_id})"></line>
       `;
 
       return svg;
@@ -1056,12 +1190,14 @@
       node.style.fontWeight = item.bold ? "700" : "400";
     };
 
-    const changeFontSize = (item, delta) => {
-      item.fontSize = Math.min(96, Math.max(14, (item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT) + delta));
+    const changeFontSize = (item, delta, absolute) => {
+      const current = item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT;
+      const raw = Number.isFinite(absolute) ? absolute : current + delta;
+      item.fontSize = Math.min(96, Math.max(14, Math.round(raw)));
       const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-text`);
       const label = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"] .whiteboard-font-size-label`);
       if (node) { applyTextStyle(item, node); }
-      if (label) { label.textContent = String(item.fontSize); }
+      if (label) { label.value = String(item.fontSize); }
       persist();
     };
 
@@ -1087,9 +1223,10 @@
       }, "A−");
       toolbar.append(smaller);
 
-      toolbar.append(lib.element.create("div", {
-        class: "whiteboard-font-size-label lucida-grande"
-      }, String(item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT)));
+      toolbar.append(createFontSizeInput(
+        () => item.fontSize || WHITEBOARD_TEXT_DEFAULT_FONT,
+        (size) => { changeFontSize(item, 0, size); }
+      ));
 
       const larger = lib.element.create("button", {
         type: "button",
@@ -1110,12 +1247,21 @@
         event.preventDefault();
       };
 
+      const commitOpenSize = () => {
+        const field = toolbar.querySelector(".whiteboard-font-size-label");
+        if (field && document.activeElement === field && typeof field.commitFontSize === "function") {
+          field.commitFontSize();
+        }
+      };
+
       smaller.addEventListener("pointerdown", event => {
         stop(event);
+        commitOpenSize();
         changeFontSize(item, -2);
       });
       larger.addEventListener("pointerdown", event => {
         stop(event);
+        commitOpenSize();
         changeFontSize(item, 2);
       });
       bold_btn.addEventListener("pointerdown", event => {
@@ -1133,7 +1279,7 @@
       state.items.forEach(item => {
         if (item.type === "arrow") {
           world.append(renderArrow(item));
-          if (selected_id === item.id) {
+          if (isSolo(item.id)) {
             world.append(renderHandles(item));
             renderDeleteButton(item, world, {
               x: (item.x1 + item.x2) / 2,
@@ -1160,7 +1306,7 @@
         if (item.height) { box.style.height = `${item.height}px`; }
 
         const node = lib.element.create("div", {
-          class: `whiteboard-text lucida-grande${selected_id === item.id ? " is-selected" : ""}`
+          class: `whiteboard-text lucida-grande${isSelected(item.id) ? " is-selected" : ""}`
         });
         node.textContent = item.text || "";
         applyTextStyle(item, node);
@@ -1178,7 +1324,7 @@
         });
         box.append(node);
 
-        if (selected_id === item.id) {
+        if (isSolo(item.id)) {
           renderTextHandles(box, item);
           renderTextToolbar(box, item);
         }
@@ -1253,11 +1399,12 @@
     };
 
     const deleteSelected = () => {
-      if (!selected_id) { return; }
+      const ids = selected_ids.length ? selected_ids : (selected_id ? [selected_id] : []);
+      if (!ids.length) { return; }
       stopEditing();
-      state.items = state.items.filter(item => item.id !== selected_id);
-      selected_id = null;
-      selected_cells = [];
+      const drop = new Set(ids);
+      state.items = state.items.filter(item => !drop.has(item.id));
+      setSelection([]);
       renderItems();
       persist();
     };
@@ -1304,10 +1451,11 @@
           const item = findItem(interaction.id);
           if (item && Math.hypot(item.x2 - item.x1, item.y2 - item.y1) < 24) {
             state.items = state.items.filter(entry => entry.id !== item.id);
-            selected_id = null;
+            setSelection([]);
             renderItems();
           }
         }
+        hideMarquee();
         interaction = null;
         viewport.classList.remove("is-panning");
       }
@@ -1365,6 +1513,11 @@
     const cleanupCanvasPopup = () => {
       unbindTouchFollow();
       unlockScrollAncestors();
+      hideMarquee();
+      document.removeEventListener("keydown", onCanvasKeyDown);
+      document.removeEventListener("keyup", onCanvasKeyUp);
+      window.removeEventListener("blur", onCanvasBlur);
+      space_pan = false;
       pinch = null;
       interaction = null;
     };
@@ -1380,10 +1533,129 @@
       observer.observe(document.body, { childList: true });
     };
 
+    let marquee_el = null;
+
+    const hideMarquee = () => {
+      if (marquee_el) {
+        marquee_el.remove();
+        marquee_el = null;
+      }
+      viewport.classList.remove("is-selecting");
+    };
+
+    const showMarquee = (rect) => {
+      if (!marquee_el) {
+        marquee_el = lib.element.create("div", { class: "whiteboard-marquee" });
+        world.append(marquee_el);
+      }
+      marquee_el.style.left = `${rect.x}px`;
+      marquee_el.style.top = `${rect.y}px`;
+      marquee_el.style.width = `${rect.width}px`;
+      marquee_el.style.height = `${rect.height}px`;
+      viewport.classList.add("is-selecting");
+    };
+
+    const selectionRect = (x1, y1, x2, y2) => ({
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1)
+    });
+
+    const rectsOverlap = (a, b) => (
+      a.x < b.x + b.width
+      && a.x + a.width > b.x
+      && a.y < b.y + b.height
+      && a.y + a.height > b.y
+    );
+
+    const pointInRect = (x, y, rect) => (
+      x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+    );
+
+    const segmentsIntersect = (x1, y1, x2, y2, x3, y3, x4, y4) => {
+      const den = ((y4 - y3) * (x2 - x1)) - ((x4 - x3) * (y2 - y1));
+      if (Math.abs(den) < 0.00001) { return false; }
+      const ua = (((x4 - x3) * (y1 - y3)) - ((y4 - y3) * (x1 - x3))) / den;
+      const ub = (((x2 - x1) * (y1 - y3)) - ((y2 - y1) * (x1 - x3))) / den;
+      return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+    };
+
+    const arrowHitsRect = (item, rect) => {
+      const pad = 8;
+      const area = {
+        x: rect.x - pad,
+        y: rect.y - pad,
+        width: rect.width + (pad * 2),
+        height: rect.height + (pad * 2)
+      };
+      if (pointInRect(item.x1, item.y1, area) || pointInRect(item.x2, item.y2, area)) { return true; }
+      const right = area.x + area.width;
+      const bottom = area.y + area.height;
+      return segmentsIntersect(item.x1, item.y1, item.x2, item.y2, area.x, area.y, right, area.y)
+        || segmentsIntersect(item.x1, item.y1, item.x2, item.y2, right, area.y, right, bottom)
+        || segmentsIntersect(item.x1, item.y1, item.x2, item.y2, right, bottom, area.x, bottom)
+        || segmentsIntersect(item.x1, item.y1, item.x2, item.y2, area.x, bottom, area.x, area.y);
+    };
+
+    const itemBounds = (item) => {
+      if (item.type === "text") {
+        const node = world.querySelector(`.whiteboard-text-box[data-id="${item.id}"]`);
+        return {
+          x: item.x,
+          y: item.y,
+          width: item.width || node?.offsetWidth || WHITEBOARD_TEXT_DEFAULT_WIDTH,
+          height: item.height || node?.offsetHeight || WHITEBOARD_TEXT_DEFAULT_HEIGHT
+        };
+      }
+      if (item.type === "sheet") {
+        const size = whiteboardSheetSize(item);
+        return { x: item.x, y: item.y, width: size.width, height: size.height };
+      }
+      return null;
+    };
+
+    const idsInRect = (rect) => state.items.filter(item => {
+      if (item.type === "arrow") { return arrowHitsRect(item, rect); }
+      const bounds = itemBounds(item);
+      return bounds && rectsOverlap(rect, bounds);
+    }).map(item => item.id);
+
+    const syncSelectionHighlight = () => {
+      const selected = new Set(selected_ids);
+      world.querySelectorAll(".whiteboard-text-box").forEach(box => {
+        box.querySelector(".whiteboard-text")?.classList.toggle("is-selected", selected.has(box.dataset.id));
+      });
+      world.querySelectorAll(".whiteboard-sheet-box").forEach(box => {
+        const on = selected.has(box.dataset.id);
+        box.classList.toggle("is-selected", on);
+        box.querySelector(".whiteboard-sheet")?.classList.toggle("is-selected", on);
+      });
+      world.querySelectorAll("svg.whiteboard-arrow").forEach(svg => {
+        svg.classList.toggle("is-selected", selected.has(svg.getAttribute("data-id")));
+      });
+    };
+
+    const translateItem = (item, dx, dy) => {
+      if (!item || (!dx && !dy)) { return; }
+      if (item.type === "arrow") {
+        item.x1 += dx;
+        item.y1 += dy;
+        item.x2 += dx;
+        item.y2 += dy;
+        syncArrow(item);
+        return;
+      }
+      item.x += dx;
+      item.y += dy;
+      if (item.type === "sheet") { syncSheetBox(item); }
+      else { syncTextBox(item); }
+    };
+
     const applyDragMove = (clientX, clientY) => {
       if (!interaction) { return; }
 
-      if (interaction.type === "pan" || interaction.type === "move-item") {
+      if (interaction.type === "pan" || interaction.type === "move-item" || interaction.type === "marquee") {
         if (!interaction.started) {
           const distance = Math.hypot(clientX - interaction.originX, clientY - interaction.originY);
           if (distance < DRAG_THRESHOLD) { return; }
@@ -1406,26 +1678,32 @@
 
       const world_point = screenToWorld(clientX, clientY);
 
+      if (interaction.type === "marquee") {
+        if (!interaction.stripped) {
+          interaction.stripped = true;
+          world.querySelectorAll(".whiteboard-handle, .whiteboard-text-toolbar, .whiteboard-delete").forEach(node => node.remove());
+        }
+        const rect = selectionRect(interaction.originWorldX, interaction.originWorldY, world_point.x, world_point.y);
+        showMarquee(rect);
+        const hits = idsInRect(rect);
+        const next = [];
+        (interaction.additive ? [...interaction.baseIds, ...hits] : hits).forEach(id => {
+          if (id && !next.includes(id)) { next.push(id); }
+        });
+        const same = next.length === selected_ids.length && next.every((id, index) => selected_ids[index] === id);
+        if (!same) {
+          selected_cells = [];
+          setSelection(next);
+          syncSelectionHighlight();
+        }
+        return;
+      }
+
       if (interaction.type === "move-item") {
-        const item = findItem(interaction.id);
-        if (!item) { return; }
         const dx = world_point.x - interaction.lastX;
         const dy = world_point.y - interaction.lastY;
-        if (item.type === "text") {
-          item.x += dx;
-          item.y += dy;
-          syncTextBox(item);
-        } else if (item.type === "sheet") {
-          item.x += dx;
-          item.y += dy;
-          syncSheetBox(item);
-        } else {
-          item.x1 += dx;
-          item.y1 += dy;
-          item.x2 += dx;
-          item.y2 += dy;
-          syncArrow(item);
-        }
+        const ids = interaction.ids?.length ? interaction.ids : [interaction.id];
+        ids.forEach(id => translateItem(findItem(id), dx, dy));
         interaction.lastX = world_point.x;
         interaction.lastY = world_point.y;
         return;
@@ -1483,16 +1761,28 @@
         const item = findItem(ended.id);
         if (item && Math.hypot(item.x2 - item.x1, item.y2 - item.y1) < 8) {
           state.items = state.items.filter(entry => entry.id !== item.id);
-          selected_id = null;
+          setSelection([]);
         }
         setTool("pan");
       }
 
       viewport.classList.remove("is-panning");
+      hideMarquee();
       interaction = null;
       unbindTouchFollow();
 
       if (!ended) { return; }
+
+      if (ended.type === "marquee") {
+        if (!ended.started && !ended.additive) { setSelection([]); }
+        renderItems();
+        return;
+      }
+
+      if (ended.type === "pan" && ended.clearOnTap && !ended.started) {
+        setSelection([]);
+        renderItems();
+      }
 
       if (ended.type === "move-item" || ended.type === "resize-text" || ended.type === "resize-sheet-col" || ended.type === "resize-sheet-row" || ended.type === "pan" || ended.type === "draw-arrow" || ended.type === "resize-arrow") {
         if (ended.type !== "pan") { renderItems(); }
@@ -1573,7 +1863,7 @@
         cells: [[""]]
       });
       state.items.push(item);
-      selected_id = item.id;
+      setSelection([item.id]);
       setTool("pan");
       renderItems();
       persist();
@@ -1593,7 +1883,7 @@
         height: WHITEBOARD_TEXT_DEFAULT_HEIGHT
       };
       state.items.push(item);
-      selected_id = item.id;
+      setSelection([item.id]);
       persist();
       startEditing(item);
       return item;
@@ -1625,7 +1915,7 @@
       const hit = handle || delete_btn || sheet_btn ? findItem((handle || delete_btn || sheet_btn).dataset.id) : hitTest(world_point.x, world_point.y);
 
       if (delete_btn) {
-        selected_id = delete_btn.dataset.id;
+        setSelection([delete_btn.dataset.id]);
         last_click = { time: 0, id: null, x: 0, y: 0 };
         deleteSelected();
         event.preventDefault();
@@ -1636,7 +1926,7 @@
       if (sheet_btn) {
         last_click = { time: 0, id: null, x: 0, y: 0 };
         if (hit) {
-          selected_id = hit.id;
+          setSelection([hit.id]);
           if (sheet_btn.dataset.kind === "sheet-add-row") { addSheetRow(hit); }
           else if (sheet_btn.dataset.kind === "sheet-add-col") { addSheetCol(hit); }
           else if (sheet_btn.dataset.kind === "sheet-remove-row") { removeSheetRow(hit); }
@@ -1662,7 +1952,7 @@
 
       if (handle) {
         last_click = { time: 0, id: null, x: 0, y: 0 };
-        selected_id = handle.dataset.id;
+        setSelection([handle.dataset.id]);
         stopEditing();
         if (handle.dataset.kind === "text") {
           const box = world.querySelector(`.whiteboard-text-box[data-id="${selected_id}"]`);
@@ -1702,7 +1992,7 @@
         return;
       }
 
-      if (event.button === 0 && tool !== "arrow" && tool !== "sheet" && !event.ctrlKey && !event.metaKey) {
+      if (event.button === 0 && !space_pan && tool !== "arrow" && tool !== "sheet" && !event.ctrlKey && !event.metaKey) {
         const click_id = (hit?.type === "text" || hit?.type === "sheet") ? hit.id : (!hit ? "board" : null);
         if (click_id) {
           const now = Date.now();
@@ -1729,13 +2019,13 @@
         }
       }
 
-      if (tool === "sheet" && event.button === 0 && !hit) {
+      if (tool === "sheet" && event.button === 0 && !space_pan && !hit) {
         createSheetAt(world_point);
         event.preventDefault();
         return;
       }
 
-      if (tool === "arrow" && event.button === 0) {
+      if (tool === "arrow" && event.button === 0 && !space_pan) {
         const item = {
           id: whiteboardCreateId(),
           type: "arrow",
@@ -1745,7 +2035,7 @@
           y2: world_point.y
         };
         state.items.push(item);
-        selected_id = item.id;
+        setSelection([item.id]);
         interaction = {
           type: "draw-arrow",
           id: item.id,
@@ -1757,10 +2047,39 @@
         return;
       }
 
-      if (hit && event.button === 0) {
+      if ((event.button === 1 || space_pan) && !hit) {
+        interaction = {
+          type: "pan",
+          pointer_id: event.pointerId,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          originX: event.clientX,
+          originY: event.clientY,
+          started: false
+        };
+        capturePointer(event);
+        event.preventDefault();
+        return;
+      }
+
+      if (hit && event.button === 0 && !space_pan) {
         const previous_id = selected_id;
-        selected_id = hit.id;
-        if (hit.type === "sheet") {
+        const previous_ids = selected_ids.join("|");
+        const already = selected_ids.includes(hit.id);
+        const extend = event.shiftKey || ((event.ctrlKey || event.metaKey) && hit.type !== "sheet");
+        const keep_group = already && selected_ids.length > 1 && !extend;
+
+        if (extend) {
+          setSelection(already
+            ? selected_ids.filter(id => id !== hit.id)
+            : [...selected_ids, hit.id]);
+        } else if (!keep_group) {
+          setSelection([hit.id]);
+        } else {
+          selected_id = hit.id;
+        }
+
+        if (hit.type === "sheet" && isSolo(hit.id)) {
           const cell = event.target.closest(".whiteboard-sheet-cell");
           if (cell) {
             const next = { row: Number(cell.dataset.row), col: Number(cell.dataset.col) };
@@ -1773,26 +2092,30 @@
               selected_cells = [next];
             }
           }
-        } else {
-          selected_cells = [];
         }
 
-        if ((event.ctrlKey || event.metaKey) && hit.type === "sheet") {
+        if ((event.ctrlKey || event.metaKey) && hit.type === "sheet" && !event.shiftKey) {
           renderItems();
           event.preventDefault();
           return;
         }
 
-        const selected_node = world.querySelector(`.whiteboard-text-box[data-id="${hit.id}"] .whiteboard-text`)
-          || world.querySelector(`.whiteboard-sheet[data-id="${hit.id}"]`);
-        if (selected_node) { selected_node.classList.add("is-selected"); }
-        selected_cells.forEach(entry => {
-          const active_cell = world.querySelector(`.whiteboard-sheet-cell[data-id="${hit.id}"][data-row="${entry.row}"][data-col="${entry.col}"]`);
-          if (active_cell) { active_cell.classList.add("is-active"); }
-        });
+        if (extend && !selected_ids.includes(hit.id)) {
+          renderItems();
+          event.preventDefault();
+          return;
+        }
+
+        if (selected_ids.join("|") !== previous_ids || (hit.type === "sheet" && isSolo(hit.id))) {
+          renderItems();
+        } else {
+          syncSelectionHighlight();
+        }
+
         interaction = {
           type: "move-item",
           id: hit.id,
+          ids: [...selected_ids],
           pointer_id: event.pointerId,
           lastX: world_point.x,
           lastY: world_point.y,
@@ -1800,10 +2123,19 @@
           originY: event.clientY,
           started: false
         };
+      } else if (event.button === 0 && event.pointerType !== "touch" && !space_pan) {
+        interaction = {
+          type: "marquee",
+          pointer_id: event.pointerId,
+          originWorldX: world_point.x,
+          originWorldY: world_point.y,
+          originX: event.clientX,
+          originY: event.clientY,
+          additive: event.shiftKey,
+          baseIds: event.shiftKey ? [...selected_ids] : [],
+          started: false
+        };
       } else {
-        selected_id = null;
-        selected_cells = [];
-        renderItems();
         interaction = {
           type: "pan",
           pointer_id: event.pointerId,
@@ -1811,7 +2143,8 @@
           lastY: event.clientY,
           originX: event.clientX,
           originY: event.clientY,
-          started: false
+          started: false,
+          clearOnTap: event.pointerType === "touch" && event.button === 0 && !space_pan
         };
       }
       capturePointer(event);
@@ -1837,16 +2170,45 @@
       finishDrag();
     });
 
-    popup.addEventListener("keydown", event => {
-      if ((event.key === "Delete" || event.key === "Backspace") && selected_id && !editing_id) {
+    const onCanvasKeyDown = (event) => {
+      if (!popup.isConnected) { return; }
+      const typing = event.target instanceof Element
+        && event.target.closest("input, textarea, [contenteditable='true']");
+      if (event.code === "Space" && !typing) {
+        space_pan = true;
+        event.preventDefault();
+        return;
+      }
+      if (typing) { return; }
+      if ((event.key === "Delete" || event.key === "Backspace") && selected_ids.length && !editing_id) {
         event.preventDefault();
         deleteSelected();
+        return;
       }
       if (event.key === "Escape" && editing_id) {
         event.preventDefault();
         stopEditing();
+        return;
       }
-    });
+      if (event.key === "Escape" && selected_ids.length) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setSelection([]);
+        renderItems();
+      }
+    };
+
+    const onCanvasKeyUp = (event) => {
+      if (event.code === "Space") { space_pan = false; }
+    };
+
+    const onCanvasBlur = () => {
+      space_pan = false;
+    };
+
+    document.addEventListener("keydown", onCanvasKeyDown);
+    document.addEventListener("keyup", onCanvasKeyUp);
+    window.addEventListener("blur", onCanvasBlur);
 
     setTool("pan");
     applyTransform();

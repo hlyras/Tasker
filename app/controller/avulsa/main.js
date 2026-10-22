@@ -10,12 +10,25 @@ avulsaController.create = async (req, res) => {
   task.description = (req.body.description || "").trim();
   task.status = "Pendente";
   task.recurrence_type = req.body.recurrence_type === "Recorrente" ? "Recorrente" : "Unica";
-
   if (!task.description) {
     return res.send({ msg: "A descrição da tarefa avulsa é obrigatória." });
   }
 
   try {
+    const requested_order = Number(req.body.sort_order);
+    if (requested_order) {
+      task.sort_order = requested_order;
+    } else {
+      const existing = await AvulsaTask.filter({
+        order_params: [["sort_order", "desc"], ["id", "desc"]]
+      });
+      const rows = Array.isArray(existing) ? existing : [];
+      const max_order = rows.reduce((highest, row) => {
+        return Math.max(highest, Number(row.sort_order) || 0);
+      }, 0);
+      task.sort_order = max_order + 1;
+    }
+
     const task_response = await task.create();
     if (task_response.err) {
       return res.send({ msg: task_response.err });
@@ -51,6 +64,10 @@ avulsaController.update = async (req, res) => {
     task.recurrence_type = req.body.recurrence_type === "Recorrente" ? "Recorrente" : "Unica";
   }
 
+  if (req.body.sort_order !== undefined) {
+    task.sort_order = Number(req.body.sort_order) || 0;
+  }
+
   try {
     const task_response = await task.update();
     if (task_response.err) {
@@ -69,7 +86,7 @@ avulsaController.update = async (req, res) => {
 avulsaController.filter = async (req, res) => {
   const task_options = {
     strict_params: { keys: [], values: [] },
-    order_params: [['datetime', 'desc'], ['id', 'desc']]
+    order_params: [['sort_order', 'desc'], ['id', 'desc']]
   };
 
   lib.Query.fillParam("avulsa_task.status", req.body.status, task_options.strict_params);

@@ -37,4 +37,9 @@ Subtask.delete = async (id) => {
   return db(query, [id]);
 };
 
+Subtask.clearDueDate = (id) => {
+  let query = `UPDATE cms_tasker.subtask SET due_date = NULL WHERE id = ?;`;
+  return db(query, [id]);
+};
+
 module.exports = Subtask;

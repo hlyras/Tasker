@@ -1,17 +1,159 @@
-<div class="box b1 container lucida-grande margin-top-5 h-center">
-  <div class="mobile-box container">
-    <div class="mobile-box lucida-grande bold rem10 text-shadow margin-right-5 padding-10 v-center">Tarefa ativa</div>
+<div class="box b1 home-task-view-bar lucida-grande margin-top-5">
+  <div class="home-task-view-center container">
+    <select id="home-task-view" class="home-task-view-select lucida-grande bold rem10 text-shadow margin-right-5 padding-10 v-center">
+      <option value="active">Tarefa ativa</option>
+      <option value="avulsa">Tarefas avulso</option>
+    </select>
     <img class="image-prop size-20 v-center" src="/images/icon/active-task.png">
   </div>
+  <button type="button" id="home-avulsa-create" class="home-avulsa-create btn-act lucida-grande bold noborder radius-5 padding-8 pointer noselect">+ Criar tarefa</button>
 </div>
 <div id="active-task-box" class="box b1 container scroll-y h-center"></div>
 
 <script>
   document.addEventListener("DOMContentLoaded", async () => {
+    document.getElementById("home-task-view").addEventListener("change", () => {
+      updateActiveTaskBox();
+    });
+    document.getElementById("home-avulsa-create").addEventListener("click", () => {
+      openHomeAvulsaCreate();
+    });
     await updateActiveTaskBox();
   });
 
+  function homeTaskView() {
+    const select = document.getElementById("home-task-view");
+    return select && select.value === "avulsa" ? "avulsa" : "active";
+  }
+
+  function openHomeAvulsaCreate() {
+    if (typeof calendarBuildWeekdayPicker !== "function" || typeof calendarGetTimeSlots !== "function") {
+      return lib.message("O calendário ainda não está disponível.");
+    }
+
+    const popup = lib.element.create("div", {
+      class: "box b1 container padding-15 subtask-deadline-popup"
+    });
+
+    popup.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem09 padding-5 center margin-bottom-10"
+    }, "Nova tarefa avulsa"));
+
+    const description_row = calendarPickerFieldRow("/images/icon/description.png");
+    popup.append(description_row);
+    const description_input = lib.element.create("input", {
+      type: "text",
+      class: "mobile-box flex-1 lucida-grande rem08 noborder padding-5",
+      placeholder: "Ex: Ligar para o dentista, comprar leite..."
+    });
+    description_row.append(description_input);
+
+    const date_input = lib.element.create("input", {
+      type: "date",
+      class: "box b1 lucida-grande rem09 border padding-8 margin-bottom-10"
+    });
+    popup.append(date_input);
+
+    const today = new Date();
+    const minutes = today.getHours() * 60 + today.getMinutes();
+    date_input.value = calendarDateKey(today);
+    const time_input = calendarCreateTimeInput(calendarMinutesToTime(minutes));
+    popup.append(time_input);
+
+    const recurrence_row = calendarPickerFieldRow("/images/icon/refresh.png");
+    popup.append(recurrence_row);
+    const recurrence_select = lib.element.create("select", {
+      class: "mobile-box flex-1 lucida-grande rem08 noborder padding-5"
+    });
+    recurrence_row.append(recurrence_select);
+    recurrence_select.append(lib.element.create("option", { value: "Unica" }, "Única"));
+    recurrence_select.append(lib.element.create("option", { value: "Recorrente" }, "Recorrente"));
+
+    const weekday_picker = calendarBuildWeekdayPicker(date_input.value);
+    popup.append(weekday_picker.box);
+    date_input.addEventListener("change", () => {
+      if (!date_input.value) { return; }
+      weekday_picker.setAnchor(calendarParseDateKey(date_input.value).getDay());
+    });
+
+    const save_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 btn-act lucida-grande bold noborder radius-5 padding-8 pointer noselect"
+    }, "+ Criar tarefa");
+    popup.append(save_button);
+
+    const createTask = async () => {
+      const description = description_input.value.trim();
+      if (!description) {
+        return lib.message("Informe a descrição da tarefa avulsa.");
+      }
+      if (!date_input.value) {
+        return lib.message("Informe o dia.");
+      }
+      const chosen_time = calendarReadTimeInput(time_input);
+      if (!chosen_time) {
+        return lib.message("Informe o horário.");
+      }
+
+      const repeat_enabled = weekday_picker.isEnabled() || recurrence_select.value === "Recorrente";
+      const response = await API.response(Avulsa.create, {
+        description,
+        recurrence_type: repeat_enabled ? "Recorrente" : "Unica"
+      });
+      if (!response || !response.avulsa_task) { return; }
+
+      if (typeof calendarScheduleItem === "function") {
+        calendarScheduleItem(
+          "avulsa",
+          response.avulsa_task.id,
+          date_input.value,
+          chosen_time,
+          weekday_picker.getWeekdays(),
+          repeat_enabled
+        );
+      }
+
+      lib.popout();
+      const select = document.getElementById("home-task-view");
+      select.value = "avulsa";
+      await updateActiveTaskBox();
+      if (typeof homeKanbanRefresh === "function") {
+        await homeKanbanRefresh();
+      }
+      lib.message(response.done);
+    };
+
+    save_button.addEventListener("click", createTask);
+    description_input.addEventListener("keydown", event => {
+      if (event.key !== "Enter") { return; }
+      event.preventDefault();
+      createTask();
+    });
+
+    lib.popup(popup, null, false, true);
+    description_input.focus();
+  }
+
+  function showHomeTaskEmpty(message) {
+    const box = document.getElementById("active-task-box");
+    box.innerHTML = "";
+    box.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold padding-20 center"
+    }, message));
+  }
+
+  async function refreshHomeAvulsaViews() {
+    if (typeof homeKanbanRefresh === "function") {
+      await homeKanbanRefresh();
+    }
+  }
+
   async function updateActiveTaskBox() {
+    if (homeTaskView() === "avulsa") {
+      await updateAvulsaTaskBox();
+      return;
+    }
+
     let active_task_box = document.getElementById("active-task-box");
     active_task_box.innerHTML = "";
 
@@ -21,9 +163,7 @@
     active_tasks.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
 
     if (!active_tasks.length) {
-      active_task_box.append(lib.element.create("div", {
-        class: "box b1 lucida-grande bold padding-20 center"
-      }, "Nenhuma tarefa"));
+      showHomeTaskEmpty("Nenhuma tarefa");
       return;
     }
 
@@ -37,7 +177,7 @@
 
   function activeTaskDiv(active_task, milestones) {
     let active_task_div = lib.element.create("div", {
-      class: "box b2-3 container ground border shadow-st padding-5 margin-top-5 sortable-item"
+      class: "box b1 container ground border shadow-st padding-5 margin-top-5 sortable-item"
     });
 
     active_task_div.id = `task-${active_task.id}`;
@@ -209,4 +349,206 @@
 
     return active_task_div;
   };
+
+  async function updateAvulsaTaskBox() {
+    const box = document.getElementById("active-task-box");
+    box.innerHTML = "";
+
+    let avulsas = await API.response(Avulsa.filter, {}) || [];
+    avulsas = avulsas.filter(avulsa => avulsa.status !== "Concluído");
+    avulsas = sortHomeAvulsas(avulsas);
+
+    if (!avulsas.length) {
+      showHomeTaskEmpty("Nenhuma tarefa avulsa");
+      return;
+    }
+
+    avulsas.forEach(avulsa => {
+      box.append(avulsaTaskDiv(avulsa, box));
+    });
+  }
+
+  function sortHomeAvulsas(avulsas) {
+    return [...avulsas].sort((a, b) => (Number(b.sort_order) || 0) - (Number(a.sort_order) || 0) || b.id - a.id);
+  }
+
+  async function updateAvulsaOrder(box) {
+    const cards = [...box.querySelectorAll("[id^='avulsa-']")];
+
+    for (let i = 0; i < cards.length; i++) {
+      await API.response(Avulsa.update, {
+        id: cards[i].id.replace("avulsa-", ""),
+        sort_order: cards.length - i
+      }, "none");
+    }
+  }
+
+  function paintAvulsaScheduleIcon(avulsa, icon) {
+    const slot = typeof calendarFindItemSlot === "function" && calendarFindItemSlot("avulsa", avulsa.id);
+    const repeat = typeof calendarGetRepeat === "function" && calendarGetRepeat("avulsa", avulsa.id);
+    const has_schedule = Boolean(slot || repeat);
+    icon.classList.toggle("opacity-05", !has_schedule);
+    icon.classList.toggle("opacity-10", has_schedule);
+  }
+
+  function openAvulsaSchedule(avulsa, icon) {
+    if (typeof calendarOpenItemSchedule !== "function") {
+      return lib.message("O calendário ainda não está disponível.");
+    }
+
+    calendarOpenItemSchedule({
+      kind: "avulsa",
+      id: avulsa.id,
+      recurrenceType: avulsa.recurrence_type,
+      onRecurrenceChange: type => {
+        avulsa.recurrence_type = type;
+        const select = document.querySelector(`#avulsa-${avulsa.id} select`);
+        if (select) { select.value = type; }
+      },
+      onDone: async () => {
+        paintAvulsaScheduleIcon(avulsa, icon);
+        await refreshHomeAvulsaViews();
+      }
+    });
+  }
+
+  function avulsaTaskDiv(avulsa, box) {
+    const card = lib.element.create("div", {
+      class: "box b1 container ground border shadow-st padding-5 margin-top-5"
+    });
+    card.id = `avulsa-${avulsa.id}`;
+    card.dataset.datetime = avulsa.datetime || 0;
+
+    const option_div = lib.element.create("div", {
+      class: "container b1 right padding-3"
+    });
+    card.append(option_div);
+
+    const recurrence_select = lib.element.create("select", {
+      class: "mobile-box b6-10 lucida-grande rem08 border padding-3 v-center"
+    });
+    option_div.append(recurrence_select);
+    recurrence_select.append(lib.element.create("option", { value: "Unica" }, "Única"));
+    recurrence_select.append(lib.element.create("option", { value: "Recorrente" }, "Recorrente"));
+    recurrence_select.value = avulsa.recurrence_type === "Recorrente" ? "Recorrente" : "Unica";
+
+    const schedule_icon = lib.element.svg("b10 padding-5 pointer v-center", "20",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></svg>`
+    );
+    schedule_icon.title = "Horário no calendário";
+    option_div.append(schedule_icon);
+    paintAvulsaScheduleIcon(avulsa, schedule_icon);
+    schedule_icon.addEventListener("click", () => {
+      openAvulsaSchedule(avulsa, schedule_icon);
+    });
+
+    const delete_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/trash.png");
+    option_div.append(delete_icon);
+
+    const done_icon = lib.element.icon("b10 opacity-out-08 pointer",
+      "20", "/images/icon/done.png");
+    option_div.append(done_icon);
+
+    const move_icon = lib.element.svg("b10 padding-5 opacity-out-08 v-center grab", "20",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
+    );
+    option_div.append(move_icon);
+
+    lib.drag.element(card, async () => {
+      await updateAvulsaOrder(box);
+    }, move_icon, "v");
+    lib.drag.drop(card, null, "drag-over", "v");
+
+    const description = lib.element.create("textarea", {
+      class: "mobile-box b1 height-100 lucida-grande rem08 border padding-3 v-center nofocus",
+      "data-initial_value": avulsa.description
+    }, avulsa.description);
+    card.append(description);
+
+    const removeCard = () => {
+      card.remove();
+      if (!document.getElementById("active-task-box").querySelector("[id^='avulsa-']")) {
+        showHomeTaskEmpty("Nenhuma tarefa avulsa");
+      }
+    };
+
+    description.addEventListener("blur", async () => {
+      if (description.value === description.dataset.initial_value) { return; }
+
+      const next_description = description.value.trim();
+      if (!next_description) {
+        description.value = description.dataset.initial_value;
+        return lib.message("A tarefa avulsa não pode ser vazia.");
+      }
+
+      const response = await API.response(Avulsa.update, {
+        id: avulsa.id,
+        description: next_description
+      });
+      if (!response) { return; }
+
+      description.value = next_description;
+      description.dataset.initial_value = next_description;
+      avulsa.description = next_description;
+      await refreshHomeAvulsaViews();
+    });
+
+    recurrence_select.addEventListener("change", async () => {
+      const recurrence_type = recurrence_select.value === "Recorrente" ? "Recorrente" : "Unica";
+      const response = await API.response(Avulsa.update, {
+        id: avulsa.id,
+        recurrence_type
+      });
+      if (!response) {
+        recurrence_select.value = avulsa.recurrence_type === "Recorrente" ? "Recorrente" : "Unica";
+        return;
+      }
+
+      if (avulsa.recurrence_type === "Recorrente" && recurrence_type !== "Recorrente"
+        && typeof calendarClearRepeat === "function") {
+        calendarClearRepeat("avulsa", avulsa.id);
+      }
+
+      avulsa.recurrence_type = recurrence_type;
+      await refreshHomeAvulsaViews();
+    });
+
+    done_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja concluir a tarefa avulsa?", async confirmed => {
+        if (!confirmed) { return; }
+
+        const response = await API.response(Avulsa.update, {
+          id: avulsa.id,
+          status: "Concluído"
+        });
+        if (!response) { return; }
+
+        removeCard();
+        await refreshHomeAvulsaViews();
+      });
+    });
+
+    delete_icon.addEventListener("click", async () => {
+      lib.confirm("Deseja excluir a tarefa avulsa?", async confirmed => {
+        if (confirmed) { return; }
+
+        const response = await API.response(Avulsa.delete, avulsa.id);
+        if (!response) { return; }
+
+        if (typeof calendarLoadSchedule === "function" && typeof calendarRemoveAvulsaFromAllSlots === "function") {
+          await calendarRemoveAvulsaFromAllSlots(calendarLoadSchedule(), avulsa.id);
+        }
+        if (typeof calendarClearRepeat === "function") {
+          calendarClearRepeat("avulsa", avulsa.id);
+        }
+
+        removeCard();
+        lib.message(response);
+        await refreshHomeAvulsaViews();
+      }, "Não excluir", "Excluir tarefa");
+    });
+
+    return card;
+  }
 </script>

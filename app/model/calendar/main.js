@@ -8,6 +8,7 @@ const Calendar = function () {
   this.repeats;
   this.seeded_weeks;
   this.xp_events;
+  this.version;
 
   this.create = () => {
     if (!this.user_id) { return { err: "O usuário do calendário é inválido" }; }
@@ -26,6 +27,16 @@ const Calendar = function () {
 
     return db(query, values);
   };
+};
+
+Calendar.updateIfVersion = ({ id, version, schedule, repeats, seeded_weeks, xp_events }) => {
+  const query = `
+    UPDATE cms_tasker.calendar
+    SET schedule = ?, repeats = ?, seeded_weeks = ?, xp_events = ?, version = version + 1
+    WHERE id = ? AND version = ?
+  `;
+
+  return db(query, [schedule, repeats, seeded_weeks, xp_events, id, version]);
 };
 
 Calendar.filter = ({ props, inners, params, strict_params, order_params }) => {

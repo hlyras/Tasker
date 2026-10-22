@@ -1,0 +1,856 @@
+<div id="home-kanban-wrap" class="box b1 container margin-top-5" style="min-width:0;max-width:100%;overflow:hidden;"></div>
+
+<script>
+  const HOME_KANBAN_LATE_KEY = "late";
+
+  function homeKanbanBuildColumn(key, label, items, accent) {
+    const border = accent && accent.border ? `border-color:${accent.border};` : "";
+    const color = accent && accent.color ? `color:${accent.color};` : "";
+    const column = lib.element.create("div", {
+      class: "ground border radius-5 padding-5 scroll-x-hide scroll-y-auto noselect",
+      style: `flex:0 0 280px;height:100%;box-sizing:border-box;${border}`,
+      "data-agenda-day": key,
+      "data-label": label
+    });
+
+    const header = lib.element.create("div", {
+      class: "box b1 lucida-grande bold em09 center padding-5 ground sticky",
+      style: `top:0;z-index:2;${color}`,
+      "data-agenda-title": "1"
+    });
+    header.append(lib.element.create("span", {}, `${label} (${items.length})`));
+
+    if (key !== HOME_KANBAN_LATE_KEY) {
+      const add = lib.element.create("button", {
+        type: "button",
+        class: "lucida-grande bold pointer noborder ground",
+        title: "Adicionar tarefa",
+        "data-agenda-action": "1",
+        style: "position:absolute;right:4px;top:50%;transform:translateY(-50%);width:22px;height:22px;padding:0;line-height:18px;font-size:20px;color:#245ae5;"
+      }, "+");
+      add.addEventListener("click", event => {
+        event.stopPropagation();
+        event.preventDefault();
+        homeKanbanOpenAdd(key);
+      });
+      header.append(add);
+    }
+
+    column.append(header);
+
+    column.append(lib.element.create("div", {
+      class: "box b1 em08 center margin-top-10 padding-5",
+      style: items.length ? "display:none;" : "",
+      "data-agenda-empty": "1"
+    }, "Nenhum agendamento"));
+
+    items.forEach(item => {
+      column.append(homeKanbanCard(item));
+    });
+
+    return column;
+  }
+
+  function homeKanbanRepeatEnabled(recurrence_select, weekday_picker) {
+    return weekday_picker.isEnabled() || recurrence_select.value === "Recorrente";
+  }
+
+  function homeKanbanNextTime(date_key, slots) {
+    if (date_key !== calendarDateKey(new Date())) {
+      return slots.includes("08:00") ? "08:00" : slots[0];
+    }
+
+    const minutes = new Date().getHours() * 60 + new Date().getMinutes();
+    return calendarMinutesToTime(minutes);
+  }
+
+  async function homeKanbanPlaceOnDay(kind, id, date_key, time, weekdays, repeat_enabled) {
+    if (kind === "avulsa") {
+      const response = await API.response(Avulsa.update, {
+        id,
+        recurrence_type: repeat_enabled ? "Recorrente" : "Unica"
+      }, "none");
+      if (!response) { return false; }
+    }
+
+    if (kind === "subtask") {
+      const due_date = lib.datetimeToTimestamp(`${date_key}T${time}`);
+      const response = await API.response(Subtask.update, { id, due_date }, "none");
+      if (!response) { return false; }
+    }
+
+    calendarScheduleItem(kind, id, date_key, time, weekdays, repeat_enabled);
+    return true;
+  }
+
+  async function homeKanbanOpenAdd(date_key) {
+    const day_label = calendarDayLabel(calendarParseDateKey(date_key));
+    const popup = lib.element.create("div", {
+      class: "box b1 container padding-15 subtask-deadline-popup"
+    });
+
+    popup.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem09 padding-5 center margin-bottom-10"
+    }, `Adicionar em ${day_label}`));
+
+    const slots = calendarGetTimeSlots();
+    const time_input = calendarCreateTimeInput(homeKanbanNextTime(date_key, slots));
+    popup.append(time_input);
+
+    const recurrence_row = calendarPickerFieldRow("/images/icon/refresh.png");
+    recurrence_row.classList.add("margin-bottom-10");
+    popup.append(recurrence_row);
+    const recurrence_select = lib.element.create("select", {
+      class: "mobile-box flex-1 lucida-grande rem08 noborder padding-5"
+    });
+    recurrence_row.append(recurrence_select);
+    recurrence_select.append(lib.element.create("option", { value: "Unica" }, "Única"));
+    recurrence_select.append(lib.element.create("option", { value: "Recorrente" }, "Recorrente"));
+
+    const weekday_picker = calendarBuildWeekdayPicker(date_key);
+    popup.append(weekday_picker.box);
+    recurrence_select.addEventListener("change", () => {
+      weekday_picker.setEnabled(recurrence_select.value === "Recorrente");
+    });
+
+    popup.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 padding-3 margin-bottom-5"
+    }, "Nova tarefa"));
+
+    const description_row = calendarPickerFieldRow("/images/icon/description.png");
+    popup.append(description_row);
+    const description_input = lib.element.create("input", {
+      type: "text",
+      class: "mobile-box flex-1 lucida-grande rem08 noborder padding-5",
+      placeholder: "Ex: Ligar para o dentista, comprar leite..."
+    });
+    description_row.append(description_input);
+
+    const create_button = lib.element.create("button", {
+      type: "button",
+      class: "box b1 btn-act lucida-grande bold noborder radius-5 padding-8 pointer noselect margin-bottom-10"
+    }, "+ Criar tarefa");
+    popup.append(create_button);
+
+    const existing_header = lib.element.create("div", {
+      class: "box b1 container margin-bottom-5",
+      style: "flex-wrap: nowrap; align-items: center;"
+    });
+    popup.append(existing_header);
+    existing_header.append(lib.element.create("div", {
+      class: "mobile-box flex-1 lucida-grande bold rem08 padding-3 v-center"
+    }, "Adicionar existente"));
+
+    const existing_list = lib.element.create("div", {
+      class: "box b1 container ground border radius-5 scroll-y-auto",
+      style: "max-height: 32vh;"
+    });
+    popup.append(existing_list);
+    existing_list.append(lib.element.create("div", {
+      class: "box b1 lucida-grande rem08 center padding-10 opacity-out-08"
+    }, "Carregando..."));
+
+    const finish = async (message) => {
+      lib.popout();
+      await homeKanbanRefresh();
+      if (typeof calendarPopupRerender === "function") {
+        await calendarPopupRerender();
+      }
+      if (message) { lib.message(message); }
+    };
+
+    const chosenSchedule = () => ({
+      time: calendarReadTimeInput(time_input),
+      weekdays: weekday_picker.getWeekdays(),
+      repeat_enabled: homeKanbanRepeatEnabled(recurrence_select, weekday_picker)
+    });
+
+    const addExistingRow = (text, indented) => {
+      const button = lib.element.create("button", {
+        type: "button",
+        class: "box b1 lucida-grande rem08 pointer ground padding-8 left noborder",
+        style: `border-bottom: 1px solid var(--light); text-align: left;${indented ? "padding-left: 18px;" : ""}`
+      }, text);
+      return button;
+    };
+
+    const placeExisting = async (kind, id) => {
+      const chosen = chosenSchedule();
+      if (!chosen.time) {
+        return lib.message("Informe o horário.");
+      }
+      const placed = await homeKanbanPlaceOnDay(
+        kind,
+        id,
+        date_key,
+        chosen.time,
+        chosen.weekdays,
+        chosen.repeat_enabled
+      );
+      if (!placed) { return; }
+      const message = kind === "session"
+        ? "Treino adicionado ao dia."
+        : "Tarefa adicionada ao dia.";
+      await finish(message);
+    };
+
+    const createTask = async () => {
+      const description = description_input.value.trim();
+      if (!description) {
+        return lib.message("Informe a descrição da tarefa avulsa.");
+      }
+
+      const chosen = chosenSchedule();
+      if (!chosen.time) {
+        return lib.message("Informe o horário.");
+      }
+
+      const response = await API.response(Avulsa.create, {
+        description,
+        recurrence_type: chosen.repeat_enabled ? "Recorrente" : "Unica"
+      });
+      if (!response || !response.avulsa_task) { return; }
+
+      calendarScheduleItem(
+        "avulsa",
+        response.avulsa_task.id,
+        date_key,
+        chosen.time,
+        chosen.weekdays,
+        chosen.repeat_enabled
+      );
+      await finish(response.done);
+    };
+
+    create_button.addEventListener("click", createTask);
+    description_input.addEventListener("keydown", event => {
+      if (event.key !== "Enter") { return; }
+      event.preventDefault();
+      createTask();
+    });
+
+    lib.popup(popup, null, false, true);
+    description_input.focus();
+
+    const [subtasks, avulsas, sessions] = await Promise.all([
+      calendarGetCalendarSubtasks(),
+      calendarGetCalendarAvulsas(),
+      calendarGetPendingSessions()
+    ]);
+
+    const available_avulsas = (avulsas || [])
+      .filter(avulsa => !calendarIsCompleted(avulsa) && !homeKanbanHasActiveCalendar("avulsa", avulsa.id))
+      .sort((a, b) => (Number(b.sort_order) || 0) - (Number(a.sort_order) || 0) || b.id - a.id);
+
+    const available_sessions = (sessions || [])
+      .filter(session => !homeKanbanHasActiveCalendar("session", session.id))
+      .sort((a, b) => (Number(b.sort_order) || 0) - (Number(a.sort_order) || 0) || b.id - a.id);
+
+    const groups = await calendarGetActiveTaskSubtaskGroups(calendarPendingItems(subtasks));
+
+    existing_list.innerHTML = "";
+
+    existing_list.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 padding-8",
+      style: "background: var(--background);"
+    }, "Tarefas avulsas"));
+
+    if (!available_avulsas.length) {
+      existing_list.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem08 center padding-10 opacity-out-08"
+      }, "Nenhuma tarefa avulsa sem calendário"));
+    }
+
+    available_avulsas.forEach(avulsa => {
+      const button = addExistingRow(avulsa.description, false);
+      button.addEventListener("click", () => placeExisting("avulsa", avulsa.id));
+      existing_list.append(button);
+    });
+
+    existing_list.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 padding-8",
+      style: "background: var(--background);"
+    }, "Treinos"));
+
+    if (!available_sessions.length) {
+      existing_list.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem08 center padding-10 opacity-out-08"
+      }, "Nenhuma sessão de treino pendente"));
+    }
+
+    available_sessions.forEach(session => {
+      const button = lib.element.create("button", {
+        type: "button",
+        class: "box b1 lucida-grande rem08 pointer ground padding-8 left noborder",
+        style: "border-bottom: 1px solid var(--light); text-align: left;"
+      });
+
+      button.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem08 bold"
+      }, session.name));
+
+      (session.exercises || []).forEach(exercise => {
+        button.append(lib.element.create("div", {
+          class: "box b1 lucida-grande rem065 opacity-out-08"
+        }, workoutFormatExercise(exercise)));
+      });
+
+      button.addEventListener("click", () => placeExisting("session", session.id));
+      existing_list.append(button);
+    });
+
+    existing_list.append(lib.element.create("div", {
+      class: "box b1 lucida-grande bold rem08 padding-8",
+      style: "background: var(--background);"
+    }, "Tarefas"));
+
+    if (!groups.length) {
+      existing_list.append(lib.element.create("div", {
+        class: "box b1 lucida-grande rem08 center padding-10 opacity-out-08"
+      }, "Nenhuma subtarefa pendente"));
+      return;
+    }
+
+    groups.forEach(group => {
+      existing_list.append(lib.element.create("div", {
+        class: "box b1 lucida-grande bold rem08 padding-8",
+        style: "border-bottom: 1px solid var(--light);"
+      }, group.task.description));
+
+      group.subtasks.forEach(subtask => {
+        const button = addExistingRow(subtask.description, true);
+        button.addEventListener("click", () => placeExisting("subtask", subtask.id));
+        existing_list.append(button);
+      });
+    });
+  }
+
+  function homeKanbanHasActiveCalendar(kind, id) {
+    const slot = typeof calendarFindItemSlot === "function" && calendarFindItemSlot(kind, id);
+    const repeat = typeof calendarGetRepeat === "function" && calendarGetRepeat(kind, id);
+    return Boolean(slot || repeat);
+  }
+
+  function homeKanbanCard(item) {
+    const card = lib.element.create("div", {
+      class: "box b1 container ground border-st shadow-lg-st radius-5 padding-5 margin-top-5",
+      style: "cursor:grab;flex-wrap:nowrap;align-items:center;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;",
+      "data-agenda-card": "1",
+      "data-datetime": `${item.date_key}T${item.time}`
+    });
+
+    const body = lib.element.create("div", {
+      class: "mobile-box",
+      style: "flex:1;min-width:0;"
+    });
+
+    body.append(lib.element.create("div", {
+      class: "home-kanban-time lucida-grande"
+    }, item.time));
+
+    const status_class = `${item.status === "complete" ? "line-through opacity-out-06" : ""} ${item.status === "missed" ? "color-red" : ""}`;
+    body.append(lib.element.create("div", {
+      class: `lucida-grande rem08 padding-3 ${status_class}`,
+      style: "word-break:break-word;"
+    }, item.description));
+
+    if (item.kind === "session" && item.exercises && item.exercises.length) {
+      const exercises = lib.element.create("div", { class: "home-kanban-exercises" });
+      item.exercises.forEach(exercise => {
+        exercises.append(lib.element.create("div", {
+          class: `home-kanban-exercise lucida-grande ${status_class}`
+        }, workoutFormatExercise(exercise)));
+      });
+      body.append(exercises);
+    }
+
+    card.append(body);
+
+    const actions = lib.element.create("div", { class: "home-kanban-actions" });
+    card.append(actions);
+
+    const done = lib.element.icon("opacity-out-08 pointer", "18", "/images/icon/done.png");
+    done.setAttribute("data-agenda-action", "1");
+    if (item.status === "complete") { done.classList.add("opacity-out-04"); }
+    actions.append(done);
+
+    const remove = lib.element.icon("opacity-out-08 pointer", "18", "/images/icon/close-small.png");
+    remove.setAttribute("data-agenda-action", "1");
+    remove.title = "Remover deste dia";
+    actions.append(remove);
+
+    done.addEventListener("click", async event => {
+      event.stopPropagation();
+      const schedule = await calendarSetItemSlotMark(
+        calendarLoadSchedule(),
+        item.date_key,
+        item.time,
+        item.kind,
+        item.id,
+        "complete"
+      );
+      if (!schedule) { return; }
+      await homeKanbanRefresh();
+      if (typeof calendarPopupRerender === "function") {
+        await calendarPopupRerender();
+      }
+    });
+
+    remove.addEventListener("click", event => {
+      event.stopPropagation();
+      lib.confirm("Deseja remover a tarefa deste dia?", async confirmed => {
+        if (confirmed) { return; }
+
+        let schedule = calendarLoadSchedule();
+        if (item.kind === "subtask") {
+          schedule = calendarRemoveSubtaskFromSlot(schedule, item.date_key, item.time, item.id);
+        } else if (item.kind === "session") {
+          schedule = calendarRemoveSessionFromSlot(schedule, item.date_key, item.time, item.id);
+        } else {
+          schedule = calendarRemoveAvulsaFromSlot(schedule, item.date_key, item.time, item.id);
+        }
+        if (!schedule) { return; }
+        await homeKanbanRefresh();
+        if (typeof calendarPopupRerender === "function") {
+          await calendarPopupRerender();
+        }
+      }, "Não remover", "Remover deste dia");
+    });
+
+    homeKanbanEnableCardDrag(card, item);
+    return card;
+  }
+
+  function homeKanbanColumnFromPoint(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) { return null; }
+    const column = el.closest("[data-agenda-day]");
+    if (!column || column.getAttribute("data-agenda-day") === HOME_KANBAN_LATE_KEY) { return null; }
+    return column;
+  }
+
+  async function homeKanbanReschedule(item, date_key) {
+    if (!date_key || item.date_key === date_key) { return; }
+
+    let schedule = calendarLoadSchedule();
+    if (item.kind === "subtask") {
+      schedule = calendarRemoveSubtaskFromSlot(schedule, item.date_key, item.time, item.id);
+      calendarAddSubtaskToSlot(schedule, date_key, item.time, item.id);
+      const due_date = lib.datetimeToTimestamp(`${date_key}T${item.time}`);
+      await API.response(Subtask.update, { id: item.id, due_date }, "none");
+      const label = document.querySelector(`#subtask-${item.id} .subtask-deadline-date`);
+      if (label && due_date) {
+        label.textContent = calendarFormatSlotLabel(date_key, item.time);
+        label.classList.remove("display-none");
+      }
+    } else if (item.kind === "session") {
+      schedule = calendarRemoveSessionFromSlot(schedule, item.date_key, item.time, item.id);
+      calendarAddSessionToSlot(schedule, date_key, item.time, item.id);
+    } else {
+      schedule = calendarRemoveAvulsaFromSlot(schedule, item.date_key, item.time, item.id);
+      calendarAddAvulsaToSlot(schedule, date_key, item.time, item.id);
+    }
+
+    await homeKanbanRefresh();
+    if (typeof calendarPopupRerender === "function") {
+      await calendarPopupRerender();
+    }
+  }
+
+  function homeKanbanEnableCardDrag(card, item) {
+    card.addEventListener("contextmenu", event => event.preventDefault());
+    card.addEventListener("click", event => {
+      if (!card._agendaDragged) { return; }
+      card._agendaDragged = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+
+    card.addEventListener("pointerdown", event => {
+      if (event.button !== 0) { return; }
+
+      const pointer_id = event.pointerId;
+      const pointer_type = event.pointerType;
+      const start_x = event.clientX;
+      const start_y = event.clientY;
+      const slop = pointer_type === "touch" ? 14 : 6;
+      const kanban = card.closest("#home-kanban");
+      let dragging = false;
+      let armed = false;
+      let ended = false;
+      let hold_timer = 0;
+      let highlight = null;
+      let scroll_dir = 0;
+      let scroll_frame = 0;
+      let alive = false;
+      let board_scroll = null;
+      let last_x = event.clientX;
+      let last_y = event.clientY;
+      const capture_target = pointer_type === "touch" ? document.body : card;
+
+      const blockTouch = ev => {
+        if (!armed && !dragging) { return; }
+        ev.preventDefault();
+      };
+      document.addEventListener("touchmove", blockTouch, { passive: false });
+
+      const clearHighlight = () => {
+        if (!highlight) { return; }
+        highlight.style.outline = "";
+        highlight.style.outlineOffset = "";
+        highlight = null;
+      };
+
+      const setHighlight = column => {
+        if (highlight === column) { return; }
+        clearHighlight();
+        highlight = column;
+        if (!highlight) { return; }
+        highlight.style.outline = "2px solid #245ae5";
+        highlight.style.outlineOffset = "-2px";
+      };
+
+      const floatCard = () => {
+        const rect = card.getBoundingClientRect();
+        const placeholder = document.createElement("div");
+        placeholder.className = "drag-placeholder";
+        placeholder.style.height = `${rect.height}px`;
+        card._agendaPlaceholder = placeholder;
+        card.parentNode.insertBefore(placeholder, card);
+        card._dragOffsetX = start_x - rect.left;
+        card._dragOffsetY = start_y - rect.top;
+        document.body.append(card);
+        card.classList.add("drag-floating");
+        card.style.position = "fixed";
+        card.style.left = `${rect.left}px`;
+        card.style.top = `${rect.top}px`;
+        card.style.width = `${rect.width}px`;
+        card.style.margin = "0";
+        card.style.zIndex = "999999";
+        card.style.pointerEvents = "none";
+        card.style.cursor = "grabbing";
+        card.style.boxShadow = "0 8px 20px rgba(0, 0, 0, 0.25)";
+      };
+
+      const moveFloat = (x, y) => {
+        card.style.left = `${x - card._dragOffsetX}px`;
+        card.style.top = `${y - card._dragOffsetY}px`;
+      };
+
+      const clearFloat = () => {
+        card.classList.remove("drag-floating");
+        card.style.position = "";
+        card.style.left = "";
+        card.style.top = "";
+        card.style.width = "";
+        card.style.margin = "";
+        card.style.zIndex = "";
+        card.style.pointerEvents = "";
+        card.style.cursor = "";
+        card.style.boxShadow = "";
+        if (card._agendaPlaceholder) {
+          card._agendaPlaceholder.replaceWith(card);
+          card._agendaPlaceholder = null;
+        }
+      };
+
+      const stopScroll = () => {
+        alive = false;
+        scroll_dir = 0;
+        if (scroll_frame) { cancelAnimationFrame(scroll_frame); }
+        scroll_frame = 0;
+      };
+
+      const tickScroll = () => {
+        if (!alive) { return; }
+        const board = document.getElementById("home-kanban");
+        if (!board) {
+          scroll_frame = 0;
+          return;
+        }
+        if (scroll_dir) { board.scrollLeft += scroll_dir * 8; }
+        setHighlight(homeKanbanColumnFromPoint(last_x, last_y));
+        scroll_frame = requestAnimationFrame(tickScroll);
+      };
+
+      const startDrag = () => {
+        dragging = true;
+        alive = true;
+        card._agendaDragged = true;
+        card.style.outline = "";
+        try { capture_target.setPointerCapture(pointer_id); } catch (error) { }
+        floatCard();
+        scroll_frame = requestAnimationFrame(tickScroll);
+      };
+
+      const detach = () => {
+        if (ended) { return; }
+        ended = true;
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", finish);
+        document.removeEventListener("pointercancel", finish);
+        document.removeEventListener("touchmove", blockTouch);
+        clearTimeout(hold_timer);
+      };
+
+      const onMove = ev => {
+        if (ev.pointerId !== pointer_id || ended) { return; }
+        last_x = ev.clientX;
+        last_y = ev.clientY;
+        if (!armed) {
+          const dx = ev.clientX - start_x;
+          const dy = ev.clientY - start_y;
+          if (Math.abs(dx) > slop || Math.abs(dy) > slop) {
+            clearTimeout(hold_timer);
+            hold_timer = 0;
+            if (pointer_type === "touch") {
+              detach();
+              return;
+            }
+            if (board_scroll === null && kanban) { board_scroll = kanban.scrollLeft; }
+            card._agendaDragged = true;
+          }
+          if (board_scroll !== null && kanban) {
+            kanban.scrollLeft = board_scroll - (ev.clientX - start_x);
+          }
+          return;
+        }
+        if (!dragging) { startDrag(); }
+        ev.preventDefault();
+        moveFloat(ev.clientX, ev.clientY);
+        const board = document.getElementById("home-kanban");
+        if (board) {
+          const rect = board.getBoundingClientRect();
+          if (ev.clientX < rect.left + 70) { scroll_dir = -1; }
+          else if (ev.clientX > rect.right - 70) { scroll_dir = 1; }
+          else { scroll_dir = 0; }
+        }
+        setHighlight(homeKanbanColumnFromPoint(ev.clientX, ev.clientY));
+      };
+
+      const finish = async ev => {
+        if (ev.pointerId !== pointer_id || ended) { return; }
+        detach();
+        try { capture_target.releasePointerCapture(pointer_id); } catch (error) { }
+        if (kanban) { kanban._agendaCardHold = false; }
+        card.style.outline = "";
+        if (!dragging) { card.style.cursor = ""; }
+        stopScroll();
+        if (!dragging) { return; }
+        if (typeof ev.clientX === "number") {
+          last_x = ev.clientX;
+          last_y = ev.clientY;
+        }
+        const column = homeKanbanColumnFromPoint(last_x, last_y);
+        const origin = card._agendaPlaceholder && card._agendaPlaceholder.closest("[data-agenda-day]");
+        clearHighlight();
+        clearFloat();
+        if (!column || column === origin) { return; }
+        await homeKanbanReschedule(item, column.getAttribute("data-agenda-day"));
+      };
+
+      hold_timer = setTimeout(() => {
+        if (armed || dragging || ended || board_scroll !== null) { return; }
+        armed = true;
+        card.style.outline = "2px solid #245ae5";
+        card.style.cursor = "grabbing";
+        if (kanban) { kanban._agendaCardHold = true; }
+      }, 350);
+
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", finish);
+      document.addEventListener("pointercancel", finish);
+    });
+  }
+
+  function homeKanbanEnableScroll(kanban) {
+    let drag_x = 0;
+    let drag_scroll = 0;
+    let dragging = false;
+
+    kanban.addEventListener("pointerdown", event => {
+      if (event.button !== 0 || event.pointerType === "touch") { return; }
+      if (kanban._agendaCardHold) { return; }
+      if (event.target.closest("[data-agenda-action], button, [data-agenda-card]")) { return; }
+      dragging = true;
+      drag_x = event.clientX;
+      drag_scroll = kanban.scrollLeft;
+    });
+
+    kanban.addEventListener("pointermove", event => {
+      if (!dragging || kanban._agendaCardHold) { return; }
+      const delta = event.clientX - drag_x;
+      if (Math.abs(delta) < 4) { return; }
+      kanban.scrollLeft = drag_scroll - delta;
+    });
+
+    const stop = () => { dragging = false; };
+    kanban.addEventListener("pointerup", stop);
+    kanban.addEventListener("pointercancel", stop);
+  }
+
+  function homeKanbanFit() {
+    const kanban = document.getElementById("home-kanban");
+    if (!kanban) { return; }
+    const height = 420;
+    kanban.style.height = `${height}px`;
+    const style = getComputedStyle(kanban);
+    const borderY = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+    const chrome = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) + borderY;
+    const scrollbar = Math.max(0, kanban.offsetHeight - kanban.clientHeight - borderY);
+    const columnHeight = Math.max(0, height - chrome - scrollbar - 5);
+    kanban.querySelectorAll("[data-agenda-day]").forEach(column => {
+      column.style.height = `${columnHeight}px`;
+    });
+  }
+
+  function homeKanbanScrollToday(kanban) {
+    const today = kanban.querySelector(`[data-agenda-day="${calendarDateKey(new Date())}"]`);
+    if (!today) { return; }
+    const kanban_rect = kanban.getBoundingClientRect();
+    const today_rect = today.getBoundingClientRect();
+    const delta = (today_rect.left + today_rect.width / 2) - (kanban_rect.left + kanban.clientWidth / 2);
+    kanban.scrollLeft += delta;
+  }
+
+  function homeKanbanCaptureScroll(kanban) {
+    if (!kanban) { return null; }
+    const kanban_rect = kanban.getBoundingClientRect();
+    return [...kanban.querySelectorAll("[data-agenda-day]")].map(column => {
+      const rect = column.getBoundingClientRect();
+      return {
+        key: column.getAttribute("data-agenda-day"),
+        left: rect.left - kanban_rect.left
+      };
+    }).filter(item => item.left < kanban.clientWidth && item.left + 280 > 0);
+  }
+
+  function homeKanbanRestoreScroll(kanban, anchors) {
+    if (!anchors || !anchors.length) {
+      homeKanbanScrollToday(kanban);
+      return;
+    }
+    const columns = [...kanban.querySelectorAll("[data-agenda-day]")];
+    const anchor = anchors.find(item => columns.some(column => column.getAttribute("data-agenda-day") === item.key));
+    if (!anchor) {
+      homeKanbanScrollToday(kanban);
+      return;
+    }
+    const column = columns.find(item => item.getAttribute("data-agenda-day") === anchor.key);
+    const kanban_rect = kanban.getBoundingClientRect();
+    const column_rect = column.getBoundingClientRect();
+    kanban.scrollLeft += (column_rect.left - kanban_rect.left) - anchor.left;
+  }
+
+  async function homeKanbanRefresh() {
+    const wrap = document.getElementById("home-kanban-wrap");
+    if (!wrap || typeof calendarLoadSchedule !== "function") { return; }
+
+    await calendarEnsureHydrated();
+
+    const schedule = calendarLoadSchedule();
+    const subtasks = await calendarGetCalendarSubtasks();
+    const sessions = await calendarGetPendingSessions();
+    const avulsas = await calendarGetCalendarAvulsas();
+    const maps = {
+      subtask: new Map(subtasks.map(item => [calendarNormalizeId(item.id), item])),
+      session: new Map(sessions.map(item => [calendarNormalizeId(item.id), item])),
+      avulsa: new Map(avulsas.map(item => [calendarNormalizeId(item.id), item]))
+    };
+
+    const today_key = calendarDateKey(new Date());
+    const late = [];
+    const by_day = {};
+    const schedule_with_upcoming = calendarSeedUpcomingWeeks(schedule, {
+      subtasks: calendarItemIds(subtasks),
+      sessions: calendarItemIds(sessions),
+      avulsas: calendarItemIds(avulsas)
+    }, {
+      subtasks: calendarItemIds(calendarPendingItems(subtasks)),
+      sessions: calendarItemIds(sessions),
+      avulsas: calendarItemIds(calendarPendingItems(avulsas))
+    });
+
+    Object.keys(schedule_with_upcoming).sort().forEach(date_key => {
+      const day_slots = schedule_with_upcoming[date_key] || {};
+      Object.keys(day_slots).sort().forEach(time => {
+        const slot = calendarNormalizeSlot(day_slots[time]);
+        calendarResolvedOrder(slot, time).forEach(key => {
+          const entry = calendarParseOrderKey(key);
+          if (!entry) { return; }
+          const kind = entry.kind;
+          const id = entry.id;
+          const record = maps[kind].get(id);
+            if (!record) { return; }
+
+            const description = kind === "avulsa"
+              ? calendarAvulsaLabel(record)
+              : kind === "session"
+                ? record.name
+                : record.description;
+            if (!String(description || "").trim()) { return; }
+
+            const status = calendarGetItemSlotStatus(schedule_with_upcoming, date_key, time, kind, id);
+            const item_time = calendarGetItemExactTime(slot, kind, id, time);
+            const item = {
+              kind,
+              id: calendarNormalizeId(id),
+              date_key,
+              time: item_time,
+              slot_time: time,
+              status,
+              description,
+              exercises: kind === "session" ? (record.exercises || []) : []
+            };
+
+            if (date_key < today_key) {
+              const recurring = calendarHasRepeat(kind, record.id)
+                || (kind === "avulsa" && calendarIsRecurringAvulsa(record));
+              if (status !== "complete" && !recurring) { late.push(item); }
+              return;
+            }
+
+            if (!by_day[date_key]) { by_day[date_key] = []; }
+            by_day[date_key].push(item);
+        });
+      });
+    });
+
+    const scroll_anchors = homeKanbanCaptureScroll(document.getElementById("home-kanban"));
+    wrap.innerHTML = "";
+
+    const kanban = lib.element.create("div", {
+      id: "home-kanban",
+      class: "box a1 container scroll-x scroll-y-hide grab",
+      style: "flex-wrap:nowrap;align-items:stretch;gap:10px;min-width:0;max-width:100%;padding:8px 2px 0;"
+    });
+    homeKanbanEnableScroll(kanban);
+
+    kanban.append(homeKanbanBuildColumn(
+      HOME_KANBAN_LATE_KEY,
+      "Atrasados",
+      late,
+      { color: "#e32626", border: "#e32626" }
+    ));
+
+    Object.keys(by_day).sort().forEach(date_key => {
+      const day = calendarParseDateKey(date_key);
+      kanban.append(homeKanbanBuildColumn(
+        date_key,
+        calendarDayLabel(day),
+        by_day[date_key],
+        date_key === today_key ? { color: "#245ae5", border: "#245ae5" } : null
+      ));
+    });
+
+    wrap.append(kanban);
+    homeKanbanFit();
+    homeKanbanRestoreScroll(kanban, scroll_anchors);
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    await homeKanbanRefresh();
+  });
+
+  window.addEventListener("resize", homeKanbanFit);
+</script>

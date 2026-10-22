@@ -112,23 +112,40 @@
     subtask_div.id = `subtask-${subtask.id}`;
 
     let description_input = lib.element.create("textarea", {
-      class: `mobile-box b7-10 lucida-grande rem08 border padding-3 v-center wrap ${subtask.status === "Concluído" ? "line-through opacity-out-06" : ""}`,
+      class: `mobile-box flex-1 lucida-grande rem08 border padding-3 v-center wrap ${subtask.status === "Concluído" ? "line-through opacity-out-06" : ""}`,
       'data-initial_value': subtask.description
     }, subtask.description);
     subtask_div.append(description_input);
 
-    let delete_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
-      "18", "/images/icon/trash.png");
+    let deadline = lib.element.create("div", {
+      class: "subtask-deadline",
+      title: "Horário no calendário"
+    });
+    subtask_div.append(deadline);
+
+    let deadline_icon = lib.element.svg("b10 padding-5 pointer v-center", "18",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></svg>`
+    );
+    deadline.append(deadline_icon);
+    renderSubtaskDeadline(subtask, deadline_icon);
+
+    deadline.addEventListener("click", () => {
+      openSubtaskDeadline(subtask, deadline_icon);
+    });
+
+    let delete_icon = lib.element.svg("b10 padding-5 opacity-out-08 pointer v-center", "18",
+      `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
+    );
     subtask_div.append(delete_icon);
 
-    let done_icon = lib.element.icon("mobile-box b10 opacity-out-08 pointer v-center",
+    let done_icon = lib.element.icon("mobile-box b10 padding-5 opacity-out-08 pointer v-center",
       "18", "/images/icon/done.png");
     if (subtask.status === "Concluído") {
       done_icon.classList.add("opacity-out-04");
     }
     subtask_div.append(done_icon);
 
-    let move_icon = lib.element.svg("mobile-box b10 opacity-out-08 v-center grab", "18",
+    let move_icon = lib.element.svg("mobile-box b10 padding-5 opacity-out-08 v-center grab", "18",
       `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-grip-vertical-icon lucide-grip-vertical"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`
     );
     subtask_div.append(move_icon);
@@ -177,6 +194,8 @@
         description_input.classList.remove("line-through", "opacity-out-06");
         done_icon.classList.remove("opacity-out-04");
       }
+
+      renderSubtaskDeadline(subtask, deadline_icon);
     });
 
     delete_icon.addEventListener("click", async () => {
@@ -192,5 +211,66 @@
     });
 
     return subtask_div;
+  }
+
+  function subtaskCalendarSlot(subtask_id) {
+    if (typeof calendarLoadSchedule !== "function") { return null; }
+
+    const schedule = calendarLoadSchedule();
+    const id = calendarNormalizeId(subtask_id);
+
+    for (const date_key of Object.keys(schedule)) {
+      const day_slots = schedule[date_key] || {};
+
+      for (const time of Object.keys(day_slots)) {
+        const items = calendarNormalizeSlot(day_slots[time]);
+        if (items.subtasks.includes(id)) {
+          return { date_key, time };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function renderSubtaskDeadline(subtask, deadline_icon) {
+    const slot = subtaskCalendarSlot(subtask.id);
+    const repeat = typeof calendarGetRepeat === "function" && calendarGetRepeat("subtask", subtask.id);
+    const has_schedule = Boolean(slot || subtask.due_date || repeat);
+
+    deadline_icon.classList.toggle("opacity-05", !has_schedule);
+    deadline_icon.classList.toggle("opacity-10", has_schedule);
+  }
+
+  function openSubtaskDeadline(subtask, deadline_icon) {
+    if (typeof calendarOpenItemSchedule !== "function") {
+      return lib.message("O calendário ainda não está disponível.");
+    }
+
+    calendarOpenItemSchedule({
+      kind: "subtask",
+      id: subtask.id,
+      canClear: Boolean(subtask.due_date),
+      persist: async (date_key, time) => {
+        const due_date = date_key && time
+          ? lib.datetimeToTimestamp(`${date_key}T${time}`)
+          : null;
+
+        if (date_key && time && !due_date) {
+          lib.message("O horário é inválido.");
+          return false;
+        }
+
+        const response = await API.response(Subtask.update, {
+          id: subtask.id,
+          due_date
+        });
+        if (!response) { return false; }
+
+        subtask.due_date = due_date;
+        return true;
+      },
+      onDone: () => renderSubtaskDeadline(subtask, deadline_icon)
+    });
   }
 </script>
